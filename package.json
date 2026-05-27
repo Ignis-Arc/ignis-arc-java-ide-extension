@@ -31,6 +31,22 @@
     "javaExtensions": [
       "./server/ignis-java-suite-backend.jar"
     ],
+    "commands": [
+      {
+        "command": "ignis.java.navigator.refresh",
+        "title": "Refresh",
+        "icon": "$(refresh)"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "ignis.java.navigator.refresh",
+          "group": "navigation",
+          "when": "view == ignisJavaProjectNavigator"
+        }
+      ]
+    },
     "viewsContainers": {
       "activitybar": [
         {

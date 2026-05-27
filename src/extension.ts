@@ -451,6 +451,25 @@ export async function activate(context: vscode.ExtensionContext) {
                     // Trigger refresh on both Code Lenses and Explorer tree view
                     treeDataProvider.clearCache();
                     treeDataProvider.refresh();
+
+                    // Automatically schedule retries in case projects are still importing in the background
+                    setTimeout(() => {
+                        console.log('Auto-refreshing Ignis Arc Explorer (2s delay)...');
+                        treeDataProvider.clearCache();
+                        treeDataProvider.refresh();
+                    }, 2000);
+
+                    setTimeout(() => {
+                        console.log('Auto-refreshing Ignis Arc Explorer (5s delay)...');
+                        treeDataProvider.clearCache();
+                        treeDataProvider.refresh();
+                    }, 5000);
+
+                    setTimeout(() => {
+                        console.log('Auto-refreshing Ignis Arc Explorer (10s delay)...');
+                        treeDataProvider.clearCache();
+                        treeDataProvider.refresh();
+                    }, 10000);
                 });
             } else {
                 jdtlsReady = true;
