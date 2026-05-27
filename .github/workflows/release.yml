@@ -1,0 +1,72 @@
+name: Build and Release Extension
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  build:
+    name: Build & Package VSIX
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Set up Java JDK
+        uses: actions/setup-java@v3
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v1
+        with:
+          bun-version: 'latest'
+
+      - name: Extract JDT LS Compile Dependencies
+        run: |
+          mkdir -p server-project/lib
+          echo "Downloading Red Hat Java extension VSIX for JDT compile dependencies..."
+          curl -L -o redhat-java.vsix "https://marketplace.visualstudio.com/_apis/public/gallery/publishers/redhat/vsextensions/java/1.54.0/vspackage"
+          echo "Extracting jar plugins..."
+          unzip -j redhat-java.vsix "extension/server/plugins/*.jar" -d server-project/lib
+          rm -f redhat-java.vsix
+          echo "Dependencies successfully extracted to server-project/lib/"
+
+      - name: Compile OSGi Backend Bundle
+        run: |
+          chmod +x build.sh
+          ./build.sh
+
+      - name: Install Frontend Dependencies
+        run: bun install
+
+      - name: Compile TypeScript Frontend
+        run: bun x tsc -p ./
+
+      - name: Package VS Code Extension
+        run: bun x @vscode/vsce package --no-dependencies --allow-missing-repository --skip-license
+
+      - name: Upload Build Artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: packaged-extension
+          path: "*.vsix"
+
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v1
+        with:
+          files: "*.vsix"
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
