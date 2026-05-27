@@ -212,105 +212,57 @@ class IgnisJavaProjectTreeDataProvider implements vscode.TreeDataProvider<IgnisJ
             return this.projectLibrariesCache.get(projectPath);
         }
         try {
-            const javaExtension = vscode.extensions.getExtension('redhat.java');
-            if (javaExtension && javaExtension.isActive) {
-                const api = javaExtension.exports;
-                if (api && typeof api.getClasspaths === 'function') {
-                    const projectUri = vscode.Uri.file(projectPath).toString();
-                    const classpathResult = await api.getClasspaths(projectUri, { scope: 'test' });
-                    if (classpathResult) {
-                        const classpaths = classpathResult.classpaths || [];
-                        const modulepaths = classpathResult.modulepaths || [];
-                        const allPaths = [...classpaths, ...modulepaths];
+            const libs = await vscode.commands.executeCommand<any>(
+                'java.execute.workspaceCommand',
+                'ignis.java.project.getLibraries',
+                projectPath
+            );
+            if (libs) {
+                // Avoid caching empty lists while JDT LS is still loading/importing
+                if ((!libs.systemLibraries || libs.systemLibraries.length === 0) &&
+                    (!libs.referencedLibraries || libs.referencedLibraries.length === 0)) {
+                    return null;
+                }
 
-                        const systemLibraries: any[] = [];
-                        const referencedLibraries: any[] = [];
-
-                        const isSystemJar = (jarPath: string): boolean => {
-                            const lower = jarPath.toLowerCase();
-                            
-                            // If it's inside Maven or Gradle caches, it is NEVER a JDK system library!
-                            if (lower.includes('.m2/repository') || 
-                                lower.includes('.gradle/caches') || 
-                                lower.includes('/.m2/') || 
-                                lower.includes('/.gradle/')) {
-                                return false;
+                // Refine the JRE label based on path if it is generic
+                if (libs.jreName === 'JDK System Library' && libs.systemLibraries && libs.systemLibraries.length > 0) {
+                    const firstSystem = libs.systemLibraries.find((lib: any) => lib.path);
+                    if (firstSystem) {
+                        const pVal = firstSystem.path;
+                        const lowerPath = pVal.toLowerCase();
+                        let extractedName = '';
+                        if (lowerPath.includes('/jvm/')) {
+                            const parts = pVal.split(path.sep);
+                            const jvmIdx = parts.findIndex((part: string) => part.toLowerCase() === 'jvm');
+                            if (jvmIdx !== -1 && jvmIdx + 1 < parts.length) {
+                                extractedName = parts[jvmIdx + 1];
                             }
-                            
-                            // Check standard JVM/JDK installation paths
-                            return lower.includes('/usr/lib/jvm/') || 
-                                   lower.includes('/lib/jvm/') ||
-                                   lower.includes('.sdkman/candidates/java/') ||
-                                   lower.includes('javavirtualmachines') ||
-                                   lower.includes('\\program files\\java\\') ||
-                                   lower.includes('\\program files (x86)\\java\\') ||
-                                   lower.includes('jrt-fs.jar') ||
-                                   lower.includes('rt.jar');
-                        };
-
-                        for (const p of allPaths) {
-                            if (p.endsWith('.jar')) {
-                                const name = path.basename(p);
-                                const libNode = {
-                                    name: name,
-                                    path: p,
-                                    id: p // Use absolute file path as handle ID
-                                };
-                                if (isSystemJar(p)) {
-                                    systemLibraries.push(libNode);
-                                } else {
-                                    referencedLibraries.push(libNode);
-                                }
+                        } else if (lowerPath.includes('.sdkman/candidates/java/')) {
+                            const parts = pVal.split(path.sep);
+                            const javaIdx = parts.findIndex((part: string, idx: number) => part.toLowerCase() === 'java' && parts[idx - 1]?.toLowerCase() === 'candidates');
+                            if (javaIdx !== -1 && javaIdx + 1 < parts.length) {
+                                extractedName = parts[javaIdx + 1];
+                            }
+                        } else if (lowerPath.includes('javavirtualmachines')) {
+                            const parts = pVal.split(path.sep);
+                            const jvmIdx = parts.findIndex((part: string) => part.toLowerCase().includes('javavirtualmachines'));
+                            if (jvmIdx !== -1 && jvmIdx + 1 < parts.length) {
+                                extractedName = parts[jvmIdx + 1];
+                            }
+                        } else {
+                            const dirName = path.basename(path.dirname(path.dirname(pVal)));
+                            if (dirName && dirName !== '.' && dirName !== '..' && dirName.length > 2) {
+                                extractedName = dirName;
                             }
                         }
-
-                        // Avoid caching empty lists while JDT LS is still loading/importing
-                        if (systemLibraries.length === 0 && referencedLibraries.length === 0) {
-                            return null;
+                        if (extractedName) {
+                            libs.jreName = `JDK System Library [${extractedName}]`;
                         }
-
-                        let jreName = 'JDK System Library';
-                        const firstSystem = systemLibraries.find(lib => lib.path);
-                        if (firstSystem) {
-                            const pVal = firstSystem.path;
-                            const lowerPath = pVal.toLowerCase();
-                            if (lowerPath.includes('/jvm/')) {
-                                const parts = pVal.split(path.sep);
-                                const jvmIdx = parts.findIndex((part: string) => part.toLowerCase() === 'jvm');
-                                if (jvmIdx !== -1 && jvmIdx + 1 < parts.length) {
-                                    jreName = `JDK System Library [${parts[jvmIdx + 1]}]`;
-                                }
-                            } else if (lowerPath.includes('.sdkman/candidates/java/')) {
-                                const parts = pVal.split(path.sep);
-                                const javaIdx = parts.findIndex((part: string, idx: number) => part.toLowerCase() === 'java' && parts[idx - 1]?.toLowerCase() === 'candidates');
-                                if (javaIdx !== -1 && javaIdx + 1 < parts.length) {
-                                    jreName = `JDK System Library [${parts[javaIdx + 1]}]`;
-                                }
-                            } else if (lowerPath.includes('javavirtualmachines')) {
-                                const parts = pVal.split(path.sep);
-                                const jvmIdx = parts.findIndex((part: string) => part.toLowerCase().includes('javavirtualmachines'));
-                                if (jvmIdx !== -1 && jvmIdx + 1 < parts.length) {
-                                    jreName = `JDK System Library [${parts[jvmIdx + 1]}]`;
-                                }
-                            } else {
-                                // Default fallback: parent of parent containing directory
-                                const dirName = path.basename(path.dirname(path.dirname(pVal)));
-                                if (dirName && dirName !== '.' && dirName !== '..' && dirName.length > 2) {
-                                    jreName = `JDK System Library [${dirName}]`;
-                                }
-                            }
-                        }
-
-                        const libs = {
-                            jreName: jreName,
-                            systemLibraries: systemLibraries,
-                            referencedLibraries: referencedLibraries
-                        };
-
-                        this.projectLibrariesCache.set(projectPath, libs);
-                        return libs;
                     }
                 }
+
+                this.projectLibrariesCache.set(projectPath, libs);
+                return libs;
             }
         } catch (e) {
             console.error('Failed to fetch project libraries for:', projectPath, e);

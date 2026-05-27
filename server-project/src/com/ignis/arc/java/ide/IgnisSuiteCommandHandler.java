@@ -155,14 +155,15 @@ public class IgnisSuiteCommandHandler implements IDelegateCommandHandler {
         Map<String, Object> result = new HashMap<>();
         List<Map<String, Object>> systemLibs = new ArrayList<>();
         List<Map<String, Object>> userLibs = new ArrayList<>();
-        String jreName = "JRE System Library";
+        String jreName = "JDK System Library";
 
-        for (IProject project : ResourcesPlugin.getWorkspace().getRoot().getProjects()) {
-            if (project.isOpen() && project.hasNature(JavaCore.NATURE_ID)) {
-                IJavaProject javaProject = JavaCore.create(project);
-                
-                // Try to find JRE name from the classpath
-                if ("JRE System Library".equals(jreName)) {
+        try {
+            IJavaModel javaModel = JavaCore.create(ResourcesPlugin.getWorkspace().getRoot());
+            IJavaProject[] javaProjects = javaModel.getJavaProjects();
+
+            for (IJavaProject javaProject : javaProjects) {
+                // Try to find JRE description from JDT container
+                if ("JDK System Library".equals(jreName)) {
                     try {
                         for (IClasspathEntry entry : javaProject.getRawClasspath()) {
                             if (entry.getEntryKind() == IClasspathEntry.CPE_CONTAINER) {
@@ -184,22 +185,41 @@ public class IgnisSuiteCommandHandler implements IDelegateCommandHandler {
                     IPackageFragmentRoot[] roots = javaProject.getPackageFragmentRoots();
                     for (IPackageFragmentRoot root : roots) {
                         if (root.getKind() == IPackageFragmentRoot.K_BINARY) {
+                            String rootPath = root.getPath().toOSString();
                             Map<String, Object> libMap = new HashMap<>();
                             libMap.put("name", root.getElementName());
-                            libMap.put("path", root.getPath().toOSString());
+                            libMap.put("path", rootPath);
                             libMap.put("id", root.getHandleIdentifier());
 
-                            // Classify library: System JDK/JRE vs Referenced Libraries
+                            // Classify: JDK/JRE system library vs user referenced library
                             boolean isSystem = false;
-                            String pathStr = root.getPath().toOSString().toLowerCase();
-                            if (pathStr.contains("jre") || pathStr.contains("jdk") || pathStr.contains("java-") || pathStr.contains("rt.jar")) {
+                            String pathStr = rootPath.toLowerCase();
+                            
+                            // If it's a Maven or Gradle cache entry, it is NEVER a JDK system library!
+                            if (pathStr.contains(".m2/repository") || 
+                                pathStr.contains(".gradle/caches") || 
+                                pathStr.contains("/.m2/") || 
+                                pathStr.contains("/.gradle/")) {
+                                isSystem = false;
+                            } else if (pathStr.contains("jre") || 
+                                       pathStr.contains("jdk") || 
+                                       pathStr.contains("java-") || 
+                                       pathStr.contains("rt.jar") || 
+                                       pathStr.contains("jrt-fs") ||
+                                       pathStr.contains("/jvm/") ||
+                                       pathStr.contains("javavirtualmachines") ||
+                                       pathStr.contains("\\program files\\java\\")) {
                                 isSystem = true;
                             }
 
                             if (isSystem) {
-                                systemLibs.add(libMap);
+                                if (!containsPath(systemLibs, rootPath)) {
+                                    systemLibs.add(libMap);
+                                }
                             } else {
-                                userLibs.add(libMap);
+                                if (!containsPath(userLibs, rootPath)) {
+                                    userLibs.add(libMap);
+                                }
                             }
                         }
                     }
@@ -207,12 +227,23 @@ public class IgnisSuiteCommandHandler implements IDelegateCommandHandler {
                     // ignore
                 }
             }
+        } catch (Exception e) {
+            // ignore
         }
-        
+
         result.put("jreName", jreName);
         result.put("systemLibraries", systemLibs);
         result.put("referencedLibraries", userLibs);
         return result;
+    }
+
+    private boolean containsPath(List<Map<String, Object>> list, String path) {
+        for (Map<String, Object> map : list) {
+            if (path.equals(map.get("path"))) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private Object getLibraryPackages(List<Object> arguments) throws Exception {
