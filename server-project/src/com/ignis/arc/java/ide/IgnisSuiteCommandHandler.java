@@ -156,69 +156,93 @@ public class IgnisSuiteCommandHandler implements IDelegateCommandHandler {
             return null;
         }
         String projectPath = (String) arguments.get(0);
-        IProject project = null;
+        File queryDir = new File(projectPath).getCanonicalFile();
         
+        List<IProject> matchingProjects = new ArrayList<>();
         for (IProject p : ResourcesPlugin.getWorkspace().getRoot().getProjects()) {
-            if (p.isOpen() && p.getLocation() != null && p.getLocation().toOSString().equals(projectPath)) {
-                project = p;
-                break;
+            if (p.isOpen() && p.hasNature(JavaCore.NATURE_ID)) {
+                try {
+                    File projDir = p.getLocation().toFile().getCanonicalFile();
+                    // Match if project directory is equal to or a subdirectory of the query directory
+                    if (isSubdirectory(queryDir, projDir)) {
+                        matchingProjects.add(p);
+                    }
+                } catch (Exception e) {
+                    // ignore
+                }
             }
         }
         
-        if (project == null) {
+        if (matchingProjects.isEmpty()) {
             return null;
         }
 
-        IJavaProject javaProject = JavaCore.create(project);
         Map<String, Object> result = new HashMap<>();
-        
         List<Map<String, Object>> systemLibs = new ArrayList<>();
         List<Map<String, Object>> userLibs = new ArrayList<>();
+        String jreName = "JRE System Library";
 
-        IPackageFragmentRoot[] roots = javaProject.getPackageFragmentRoots();
-        for (IPackageFragmentRoot root : roots) {
-            if (root.getKind() == IPackageFragmentRoot.K_BINARY) {
-                Map<String, Object> libMap = new HashMap<>();
-                libMap.put("name", root.getElementName());
-                libMap.put("path", root.getPath().toOSString());
-                libMap.put("id", root.getHandleIdentifier());
-
-                // Classify library: System JDK/JRE vs Referenced Libraries
-                boolean isSystem = false;
-                String pathStr = root.getPath().toOSString().toLowerCase();
-                if (pathStr.contains("jre") || pathStr.contains("jdk") || pathStr.contains("java-") || pathStr.contains("rt.jar")) {
-                    isSystem = true;
-                }
-
-                if (isSystem) {
-                    systemLibs.add(libMap);
-                } else {
-                    userLibs.add(libMap);
+        for (IProject project : matchingProjects) {
+            IJavaProject javaProject = JavaCore.create(project);
+            
+            // Try to find JRE name from the first matching project
+            if ("JRE System Library".equals(jreName)) {
+                try {
+                    for (IClasspathEntry entry : javaProject.getRawClasspath()) {
+                        if (entry.getEntryKind() == IClasspathEntry.CPE_CONTAINER) {
+                            if (entry.getPath().toString().contains("org.eclipse.jdt.launching.JRE_CONTAINER")) {
+                                IClasspathContainer container = JavaCore.getClasspathContainer(entry.getPath(), javaProject);
+                                if (container != null) {
+                                    jreName = container.getDescription();
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                } catch (Exception e) {
+                    // ignore
                 }
             }
-        }
-        
-        String jreName = "JRE System Library";
-        try {
-            for (IClasspathEntry entry : javaProject.getRawClasspath()) {
-                if (entry.getEntryKind() == IClasspathEntry.CPE_CONTAINER) {
-                    if (entry.getPath().toString().contains("org.eclipse.jdt.launching.JRE_CONTAINER")) {
-                        IClasspathContainer container = JavaCore.getClasspathContainer(entry.getPath(), javaProject);
-                        if (container != null) {
-                            jreName = container.getDescription();
-                            break;
-                        }
+
+            IPackageFragmentRoot[] roots = javaProject.getPackageFragmentRoots();
+            for (IPackageFragmentRoot root : roots) {
+                if (root.getKind() == IPackageFragmentRoot.K_BINARY) {
+                    Map<String, Object> libMap = new HashMap<>();
+                    libMap.put("name", root.getElementName());
+                    libMap.put("path", root.getPath().toOSString());
+                    libMap.put("id", root.getHandleIdentifier());
+
+                    // Classify library: System JDK/JRE vs Referenced Libraries
+                    boolean isSystem = false;
+                    String pathStr = root.getPath().toOSString().toLowerCase();
+                    if (pathStr.contains("jre") || pathStr.contains("jdk") || pathStr.contains("java-") || pathStr.contains("rt.jar")) {
+                        isSystem = true;
+                    }
+
+                    if (isSystem) {
+                        systemLibs.add(libMap);
+                    } else {
+                        userLibs.add(libMap);
                     }
                 }
             }
-        } catch (Exception e) {
-            // ignore fallback
         }
-        result.put("jreName", jreName);
         
+        result.put("jreName", jreName);
         result.put("systemLibraries", systemLibs);
         result.put("referencedLibraries", userLibs);
         return result;
+    }
+
+    private boolean isSubdirectory(File parent, File child) {
+        File f = child;
+        while (f != null) {
+            if (f.equals(parent)) {
+                return true;
+            }
+            f = f.getParentFile();
+        }
+        return false;
     }
 
     private Object getLibraryPackages(List<Object> arguments) throws Exception {
