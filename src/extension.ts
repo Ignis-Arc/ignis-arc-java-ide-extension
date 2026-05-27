@@ -228,14 +228,24 @@ class IgnisJavaProjectTreeDataProvider implements vscode.TreeDataProvider<IgnisJ
 
                         const isSystemJar = (jarPath: string): boolean => {
                             const lower = jarPath.toLowerCase();
-                            return lower.includes('jre') || 
-                                   lower.includes('jdk') || 
-                                   lower.includes('java-') || 
-                                   lower.includes('rt.jar') || 
-                                   lower.includes('jrt-fs') || 
-                                   lower.includes('/jvm/') || 
-                                   lower.includes('/jdk/') || 
-                                   lower.includes('/jre/');
+                            
+                            // If it's inside Maven or Gradle caches, it is NEVER a JDK system library!
+                            if (lower.includes('.m2/repository') || 
+                                lower.includes('.gradle/caches') || 
+                                lower.includes('/.m2/') || 
+                                lower.includes('/.gradle/')) {
+                                return false;
+                            }
+                            
+                            // Check standard JVM/JDK installation paths
+                            return lower.includes('/usr/lib/jvm/') || 
+                                   lower.includes('/lib/jvm/') ||
+                                   lower.includes('.sdkman/candidates/java/') ||
+                                   lower.includes('javavirtualmachines') ||
+                                   lower.includes('\\program files\\java\\') ||
+                                   lower.includes('\\program files (x86)\\java\\') ||
+                                   lower.includes('jrt-fs.jar') ||
+                                   lower.includes('rt.jar');
                         };
 
                         for (const p of allPaths) {
@@ -262,10 +272,32 @@ class IgnisJavaProjectTreeDataProvider implements vscode.TreeDataProvider<IgnisJ
                         let jreName = 'JDK System Library';
                         const firstSystem = systemLibraries.find(lib => lib.path);
                         if (firstSystem) {
-                            const parts = firstSystem.path.split(path.sep);
-                            const jvmIdx = parts.findIndex((part: string) => part.includes('jvm') || part.includes('java-') || part.includes('jdk') || part.includes('jre'));
-                            if (jvmIdx !== -1 && jvmIdx + 1 < parts.length) {
-                                jreName = `JDK System Library [${parts[jvmIdx + 1]}]`;
+                            const pVal = firstSystem.path;
+                            const lowerPath = pVal.toLowerCase();
+                            if (lowerPath.includes('/jvm/')) {
+                                const parts = pVal.split(path.sep);
+                                const jvmIdx = parts.findIndex((part: string) => part.toLowerCase() === 'jvm');
+                                if (jvmIdx !== -1 && jvmIdx + 1 < parts.length) {
+                                    jreName = `JDK System Library [${parts[jvmIdx + 1]}]`;
+                                }
+                            } else if (lowerPath.includes('.sdkman/candidates/java/')) {
+                                const parts = pVal.split(path.sep);
+                                const javaIdx = parts.findIndex((part: string, idx: number) => part.toLowerCase() === 'java' && parts[idx - 1]?.toLowerCase() === 'candidates');
+                                if (javaIdx !== -1 && javaIdx + 1 < parts.length) {
+                                    jreName = `JDK System Library [${parts[javaIdx + 1]}]`;
+                                }
+                            } else if (lowerPath.includes('javavirtualmachines')) {
+                                const parts = pVal.split(path.sep);
+                                const jvmIdx = parts.findIndex((part: string) => part.toLowerCase().includes('javavirtualmachines'));
+                                if (jvmIdx !== -1 && jvmIdx + 1 < parts.length) {
+                                    jreName = `JDK System Library [${parts[jvmIdx + 1]}]`;
+                                }
+                            } else {
+                                // Default fallback: parent of parent containing directory
+                                const dirName = path.basename(path.dirname(path.dirname(pVal)));
+                                if (dirName && dirName !== '.' && dirName !== '..' && dirName.length > 2) {
+                                    jreName = `JDK System Library [${dirName}]`;
+                                }
                             }
                         }
 
