@@ -2,13 +2,13 @@
   "name": "ignis-arc-java-ide-extension",
   "displayName": "Ignis Arc Java IDE Extension Pack",
   "description": "Premium Java IDE additions featuring active-theme project navigation and real-time method complexity Code Lenses.",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "publisher": "lukeme1107",
   "license": "MIT",
   "icon": "icons/ignis-logo.png",
   "repository": {
     "type": "git",
-    "url": "https://github.com/orgs/Ignis-Arc/ignis-arc-java-ide-extension.git"
+    "url": "https://github.com/Ignis-Arc/ignis-arc-java-ide-extension.git"
   },
   "engines": {
     "vscode": "^1.77.0"
@@ -21,6 +21,7 @@
   "activationEvents": [
     "onLanguage:java",
     "onView:ignisJavaProjectNavigator",
+    "onView:ignisJavaComplexityAnalyzer",
     "workspaceContains:pom.xml",
     "workspaceContains:build.gradle",
     "workspaceContains:build.gradle.kts",
@@ -36,6 +37,11 @@
         "command": "ignis.java.navigator.refresh",
         "title": "Refresh",
         "icon": "$(refresh)"
+      },
+      {
+        "command": "ignis.java.complexity.refresh",
+        "title": "Refresh List",
+        "icon": "$(refresh)"
       }
     ],
     "menus": {
@@ -44,6 +50,11 @@
           "command": "ignis.java.navigator.refresh",
           "group": "navigation",
           "when": "view == ignisJavaProjectNavigator"
+        },
+        {
+          "command": "ignis.java.complexity.refresh",
+          "group": "navigation",
+          "when": "view == ignisJavaComplexityAnalyzer"
         }
       ]
     },
@@ -61,6 +72,11 @@
         {
           "id": "ignisJavaProjectNavigator",
           "name": "Ignis Arc Java Explorer",
+          "when": "ignisJava:isJavaProject"
+        },
+        {
+          "id": "ignisJavaComplexityAnalyzer",
+          "name": "Ignis Arc Complexity Analyzer",
           "when": "ignisJava:isJavaProject"
         }
       ]
@@ -82,6 +98,16 @@
           "type": "integer",
           "default": 5,
           "description": "Threshold for moderate complexity."
+        },
+        "ignis.java.complexity.criticalThreshold": {
+          "type": "integer",
+          "default": 20,
+          "description": "Threshold for critical complexity."
+        },
+        "ignis.java.references.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable showing dynamic references/usages Code Lenses above Java classes, methods, and fields."
         }
       }
     }

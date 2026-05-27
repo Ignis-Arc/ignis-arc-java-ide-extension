@@ -27,6 +27,8 @@ public class IgnisSuiteCommandHandler implements IDelegateCommandHandler {
             return getLibraryPackages(arguments);
         } else if ("ignis.java.library.getClasses".equals(commandId)) {
             return getLibraryClasses(arguments);
+        } else if ("ignis.java.complexity.scanWorkspace".equals(commandId)) {
+            return scanWorkspaceComplexity(arguments, monitor);
         }
         throw new UnsupportedOperationException("Unsupported command: " + commandId);
     }
@@ -55,12 +57,17 @@ public class IgnisSuiteCommandHandler implements IDelegateCommandHandler {
                     return true;
                 }
 
+                // Filter out synthesized/Lombok-generated methods
+                if (node.getBody().getStartPosition() <= node.getName().getStartPosition()) {
+                    return true;
+                }
+
                 int complexity = calculateCyclomaticComplexity(node);
 
                 Map<String, Object> metric = new HashMap<>();
                 metric.put("name", node.getName().getIdentifier());
                 metric.put("complexity", complexity);
-                metric.put("startLine", astRoot.getLineNumber(node.getStartPosition()));
+                metric.put("startLine", astRoot.getLineNumber(node.getName().getStartPosition()));
                 metric.put("endLine", astRoot.getLineNumber(node.getStartPosition() + node.getLength()));
 
                 methodsMetrics.add(metric);
@@ -117,6 +124,11 @@ public class IgnisSuiteCommandHandler implements IDelegateCommandHandler {
                 if (op == InfixExpression.Operator.CONDITIONAL_AND || op == InfixExpression.Operator.CONDITIONAL_OR) {
                     count[0]++;
                 }
+                return true;
+            }
+            @Override
+            public boolean visit(ConditionalExpression node) {
+                count[0]++;
                 return true;
             }
         });
@@ -310,5 +322,103 @@ public class IgnisSuiteCommandHandler implements IDelegateCommandHandler {
             }
         }
         return classesList;
+    }
+
+    private Object scanWorkspaceComplexity(List<Object> arguments, IProgressMonitor monitor) throws Exception {
+        int threshold = 10;
+        if (arguments != null && !arguments.isEmpty()) {
+            Object firstArg = arguments.get(0);
+            if (firstArg instanceof Number) {
+                threshold = ((Number) firstArg).intValue();
+            } else if (firstArg instanceof String) {
+                try {
+                    threshold = Integer.parseInt((String) firstArg);
+                } catch (NumberFormatException e) {
+                    // ignore
+                }
+            }
+        }
+
+        List<Map<String, Object>> result = new ArrayList<>();
+        IJavaModel javaModel = JavaCore.create(ResourcesPlugin.getWorkspace().getRoot());
+        IJavaProject[] javaProjects = javaModel.getJavaProjects();
+
+        for (IJavaProject javaProject : javaProjects) {
+            if (!javaProject.getProject().isOpen()) {
+                continue;
+            }
+            IPackageFragmentRoot[] roots = javaProject.getPackageFragmentRoots();
+            for (IPackageFragmentRoot root : roots) {
+                if (root.getKind() == IPackageFragmentRoot.K_SOURCE) {
+                    analyzePackageFragmentRootComplexity(root, threshold, result, monitor);
+                }
+            }
+        }
+
+        result.sort((a, b) -> {
+            int compA = (Integer) a.get("complexity");
+            int compB = (Integer) b.get("complexity");
+            return Integer.compare(compB, compA);
+        });
+
+        return result;
+    }
+
+    private void analyzePackageFragmentRootComplexity(IPackageFragmentRoot root, int threshold, List<Map<String, Object>> result, IProgressMonitor monitor) throws Exception {
+        for (IJavaElement child : root.getChildren()) {
+            if (child instanceof IPackageFragment) {
+                IPackageFragment pkg = (IPackageFragment) child;
+                for (ICompilationUnit unit : pkg.getCompilationUnits()) {
+                    analyzeUnitComplexity(unit, threshold, result, monitor);
+                }
+            }
+        }
+    }
+
+    private void analyzeUnitComplexity(ICompilationUnit unit, int threshold, List<Map<String, Object>> result, IProgressMonitor monitor) throws Exception {
+        ASTParser parser = ASTParser.newParser(AST.JLS17);
+        parser.setSource(unit);
+        parser.setResolveBindings(false);
+        CompilationUnit astRoot = (CompilationUnit) parser.createAST(monitor);
+
+        String fileUri = JDTUtils.toUri(unit);
+
+        astRoot.accept(new ASTVisitor() {
+            @Override
+            public boolean visit(MethodDeclaration node) {
+                if (node.getBody() == null) {
+                    return true;
+                }
+
+                // Filter out synthesized/Lombok-generated methods
+                if (node.getBody().getStartPosition() <= node.getName().getStartPosition()) {
+                    return true;
+                }
+
+                int complexity = calculateCyclomaticComplexity(node);
+                if (complexity >= threshold) {
+                    Map<String, Object> metric = new HashMap<>();
+                    metric.put("name", node.getName().getIdentifier());
+                    metric.put("complexity", complexity);
+                    metric.put("startLine", astRoot.getLineNumber(node.getName().getStartPosition()));
+                    metric.put("endLine", astRoot.getLineNumber(node.getStartPosition() + node.getLength()));
+                    metric.put("uri", fileUri);
+
+                    String className = "";
+                    ASTNode parent = node.getParent();
+                    while (parent != null) {
+                        if (parent instanceof TypeDeclaration) {
+                            className = ((TypeDeclaration) parent).getName().getIdentifier();
+                            break;
+                        }
+                        parent = parent.getParent();
+                    }
+                    metric.put("className", className);
+
+                    result.add(metric);
+                }
+                return true;
+            }
+        });
     }
 }

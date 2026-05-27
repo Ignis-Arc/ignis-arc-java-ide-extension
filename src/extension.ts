@@ -40,11 +40,13 @@ function registerComplexityLens(context: vscode.ExtensionContext) {
         })
     );
 
-    // Register Code Lens Provider
+    // Register Code Lens Providers
     const docSelector: vscode.DocumentSelector = { scheme: 'file', language: 'java' };
     const codeLensProvider = new JavaComplexityCodeLensProvider();
+    const referencesLensProvider = new JavaReferencesCodeLensProvider();
     context.subscriptions.push(
-        vscode.languages.registerCodeLensProvider(docSelector, codeLensProvider)
+        vscode.languages.registerCodeLensProvider(docSelector, codeLensProvider),
+        vscode.languages.registerCodeLensProvider(docSelector, referencesLensProvider)
     );
 }
 
@@ -117,6 +119,108 @@ class JavaComplexityCodeLensProvider implements vscode.CodeLensProvider {
             console.error('Error calculating Java complexity:', error);
             return [];
         }
+    }
+}
+
+class JavaReferencesCodeLensProvider implements vscode.CodeLensProvider {
+    private _onDidChangeCodeLenses: vscode.EventEmitter<void> = new vscode.EventEmitter<void>();
+    public readonly onDidChangeCodeLenses: vscode.Event<void> = this._onDidChangeCodeLenses.event;
+
+    constructor() {
+        vscode.workspace.onDidChangeConfiguration((e) => {
+            if (e.affectsConfiguration('ignis.java.references')) {
+                this._onDidChangeCodeLenses.fire();
+            }
+        });
+    }
+
+    async provideCodeLenses(
+        document: vscode.TextDocument,
+        token: vscode.CancellationToken
+    ): Promise<vscode.CodeLens[]> {
+        if (!jdtlsReady) {
+            return [];
+        }
+
+        const config = vscode.workspace.getConfiguration('ignis.java.references');
+        const enabled = config.get<boolean>('enabled', true);
+        if (!enabled) {
+            return [];
+        }
+
+        try {
+            // Retrieve all hierarchical document symbols from the active document
+            const symbols = await vscode.commands.executeCommand<vscode.DocumentSymbol[]>(
+                'vscode.executeDocumentSymbolProvider',
+                document.uri
+            );
+
+            if (!symbols || symbols.length === 0) {
+                return [];
+            }
+
+            const lenses: vscode.CodeLens[] = [];
+
+            const traverse = (syms: vscode.DocumentSymbol[]) => {
+                for (const sym of syms) {
+                    if (
+                        sym.kind === vscode.SymbolKind.Class ||
+                        sym.kind === vscode.SymbolKind.Interface ||
+                        sym.kind === vscode.SymbolKind.Enum ||
+                        sym.kind === vscode.SymbolKind.Method ||
+                        sym.kind === vscode.SymbolKind.Constructor ||
+                        sym.kind === vscode.SymbolKind.Field ||
+                        sym.kind === vscode.SymbolKind.Constant
+                    ) {
+                        lenses.push(new vscode.CodeLens(sym.selectionRange));
+                    }
+                    if (sym.children && sym.children.length > 0) {
+                        traverse(sym.children);
+                    }
+                }
+            };
+
+            traverse(symbols);
+            return lenses;
+        } catch (error) {
+            console.error('Error providing references Code Lenses:', error);
+            return [];
+        }
+    }
+
+    async resolveCodeLens(
+        codeLens: vscode.CodeLens,
+        token: vscode.CancellationToken
+    ): Promise<vscode.CodeLens> {
+        const activeEditor = vscode.window.activeTextEditor;
+        if (!activeEditor) {
+            codeLens.command = { title: '🔗 0 usages', command: '' };
+            return codeLens;
+        }
+
+        try {
+            const locations = await vscode.commands.executeCommand<vscode.Location[]>(
+                'vscode.executeReferenceProvider',
+                activeEditor.document.uri,
+                codeLens.range.start
+            );
+
+            const count = locations ? locations.length : 0;
+            const title = `🔗 ${count} usage${count === 1 ? '' : 's'}`;
+
+            codeLens.command = {
+                title: title,
+                command: 'editor.action.showReferences',
+                arguments: [activeEditor.document.uri, codeLens.range.start, locations || []]
+            };
+        } catch (error) {
+            codeLens.command = {
+                title: '🔗 0 usages',
+                command: ''
+            };
+        }
+
+        return codeLens;
     }
 }
 
@@ -461,6 +565,91 @@ class IgnisJavaProjectTreeDataProvider implements vscode.TreeDataProvider<IgnisJ
     }
 }
 
+// ==========================================
+// 3. Complexity Explorer Sideview
+// ==========================================
+
+interface ComplexityItem {
+    name: string;
+    complexity: number;
+    startLine: number; // 1-indexed
+    endLine: number;   // 1-indexed
+    uri: string;
+    className: string;
+}
+
+class IgnisJavaComplexityTreeDataProvider implements vscode.TreeDataProvider<ComplexityItem> {
+    private _onDidChangeTreeData: vscode.EventEmitter<ComplexityItem | undefined | null | void> = new vscode.EventEmitter<ComplexityItem | undefined | null | void>();
+    public readonly onDidChangeTreeData: vscode.Event<ComplexityItem | undefined | null | void> = this._onDidChangeTreeData.event;
+
+    private items: ComplexityItem[] = [];
+
+    refresh(): void {
+        this._onDidChangeTreeData.fire();
+    }
+
+    getTreeItem(element: ComplexityItem): vscode.TreeItem {
+        const config = vscode.workspace.getConfiguration('ignis.java.complexity');
+        const criticalThreshold = config.get<number>('criticalThreshold', 20);
+        const isCritical = element.complexity >= criticalThreshold;
+
+        const treeItem = new vscode.TreeItem(
+            `${element.className}.${element.name}`,
+            vscode.TreeItemCollapsibleState.None
+        );
+
+        treeItem.description = `Complexity: ${element.complexity}`;
+        
+        if (isCritical) {
+            treeItem.iconPath = new vscode.ThemeIcon('error', new vscode.ThemeColor('problems.errorIcon.foreground'));
+            treeItem.tooltip = `🔴 Critical Complexity: ${element.complexity}\nMethod: ${element.className}.${element.name}\nFile: ${vscode.Uri.parse(element.uri).fsPath}\nLine: ${element.startLine}`;
+        } else {
+            treeItem.iconPath = new vscode.ThemeIcon('warning', new vscode.ThemeColor('problems.warningIcon.foreground'));
+            treeItem.tooltip = `🟡 High Complexity: ${element.complexity}\nMethod: ${element.className}.${element.name}\nFile: ${vscode.Uri.parse(element.uri).fsPath}\nLine: ${element.startLine}`;
+        }
+
+        treeItem.command = {
+            command: 'ignis.java.complexity.goto',
+            title: 'Go to Method',
+            arguments: [element]
+        };
+
+        return treeItem;
+    }
+
+    async getChildren(element?: ComplexityItem): Promise<ComplexityItem[]> {
+        if (element) {
+            return [];
+        }
+
+        if (!jdtlsReady) {
+            return [];
+        }
+
+        const config = vscode.workspace.getConfiguration('ignis.java.complexity');
+        const enabled = config.get<boolean>('enabled', true);
+        if (!enabled) {
+            return [];
+        }
+
+        const highThreshold = config.get<number>('highThreshold', 10);
+
+        try {
+            const results = await vscode.commands.executeCommand<ComplexityItem[]>(
+                'java.execute.workspaceCommand',
+                'ignis.java.complexity.scanWorkspace',
+                highThreshold
+            );
+
+            this.items = results || [];
+            return this.items;
+        } catch (error) {
+            console.error('Error scanning workspace complexity:', error);
+            return [];
+        }
+    }
+}
+
 export async function activate(context: vscode.ExtensionContext) {
     console.log('Ignis Arc Java IDE Extension Pack is active!');
 
@@ -474,6 +663,13 @@ export async function activate(context: vscode.ExtensionContext) {
         showCollapseAll: true
     });
     context.subscriptions.push(treeView);
+
+    const complexityDataProvider = new IgnisJavaComplexityTreeDataProvider();
+    const complexityView = vscode.window.createTreeView('ignisJavaComplexityAnalyzer', {
+        treeDataProvider: complexityDataProvider,
+        showCollapseAll: false
+    });
+    context.subscriptions.push(complexityView);
 
     registerComplexityLens(context);
 
@@ -491,27 +687,31 @@ export async function activate(context: vscode.ExtensionContext) {
                 api.serverReady().then(() => {
                     console.log('Java Language Server is fully ready! Enabling Ignis Arc Explorer...');
                     jdtlsReady = true;
-                    // Trigger refresh on both Code Lenses and Explorer tree view
+                    // Trigger refresh on both Code Lenses, Explorer, and Complexity tree views
                     treeDataProvider.clearCache();
                     treeDataProvider.refresh();
+                    complexityDataProvider.refresh();
 
                     // Automatically schedule retries in case projects are still importing in the background
                     setTimeout(() => {
-                        console.log('Auto-refreshing Ignis Arc Explorer (2s delay)...');
+                        console.log('Auto-refreshing Ignis Arc Explorer & Complexity sideview (2s delay)...');
                         treeDataProvider.clearCache();
                         treeDataProvider.refresh();
+                        complexityDataProvider.refresh();
                     }, 2000);
 
                     setTimeout(() => {
-                        console.log('Auto-refreshing Ignis Arc Explorer (5s delay)...');
+                        console.log('Auto-refreshing Ignis Arc Explorer & Complexity sideview (5s delay)...');
                         treeDataProvider.clearCache();
                         treeDataProvider.refresh();
+                        complexityDataProvider.refresh();
                     }, 5000);
 
                     setTimeout(() => {
-                        console.log('Auto-refreshing Ignis Arc Explorer (10s delay)...');
+                        console.log('Auto-refreshing Ignis Arc Explorer & Complexity sideview (10s delay)...');
                         treeDataProvider.clearCache();
                         treeDataProvider.refresh();
+                        complexityDataProvider.refresh();
                     }, 10000);
                 });
             } else {
@@ -524,6 +724,7 @@ export async function activate(context: vscode.ExtensionContext) {
                     api.onDidProjectsImport(() => {
                         treeDataProvider.clearCache();
                         treeDataProvider.refresh();
+                        complexityDataProvider.refresh();
                     })
                 );
             }
@@ -532,6 +733,7 @@ export async function activate(context: vscode.ExtensionContext) {
                     api.onDidClasspathUpdate(() => {
                         treeDataProvider.clearCache();
                         treeDataProvider.refresh();
+                        complexityDataProvider.refresh();
                     })
                 );
             }
@@ -559,6 +761,37 @@ export async function activate(context: vscode.ExtensionContext) {
                         vscode.window.showErrorMessage(`Failed to open Java file: ${err}`);
                     }
                 );
+            }
+        }),
+        vscode.commands.registerCommand('ignis.java.complexity.refresh', () => {
+            complexityDataProvider.refresh();
+        }),
+        vscode.commands.registerCommand('ignis.java.complexity.goto', (item: ComplexityItem) => {
+            if (item && item.uri) {
+                const uri = vscode.Uri.parse(item.uri);
+                vscode.workspace.openTextDocument(uri).then(
+                    (doc) => {
+                        vscode.window.showTextDocument(doc).then((editor) => {
+                            const line = Math.max(0, item.startLine - 1);
+                            const pos = new vscode.Position(line, 0);
+                            const endPos = new vscode.Position(line, doc.lineAt(line).text.length);
+                            editor.selection = new vscode.Selection(pos, endPos);
+                            editor.revealRange(new vscode.Range(pos, endPos), vscode.TextEditorRevealType.InCenter);
+                        });
+                    },
+                    (err) => {
+                        vscode.window.showErrorMessage(`Failed to open Java file: ${err}`);
+                    }
+                );
+            }
+        })
+    );
+
+    // 4. Hook up document save events to automatically refresh the complexity sideview on local saves
+    context.subscriptions.push(
+        vscode.workspace.onDidSaveTextDocument((document) => {
+            if (document.languageId === 'java' || document.fileName.endsWith('.java')) {
+                complexityDataProvider.refresh();
             }
         })
     );
