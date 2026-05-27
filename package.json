@@ -4,6 +4,7 @@
   "description": "Premium Java IDE additions featuring active-theme project navigation and real-time method complexity Code Lenses.",
   "version": "0.1.0",
   "publisher": "ignis-arc-digital",
+  "license": "MIT",
   "icon": "icons/ignis-logo.png",
   "repository": {
     "type": "git",
