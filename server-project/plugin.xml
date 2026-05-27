@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<?eclipse version="3.4"?>
+<plugin>
+   <extension point="org.eclipse.jdt.ls.core.delegateCommandHandler">
+      <delegateCommandHandler class="com.ignis.arc.java.ide.IgnisSuiteCommandHandler">
+         <command id="ignis.java.complexity.calculate" />
+         <command id="ignis.java.project.getStructure" />
+         <command id="ignis.java.project.getLibraries" />
+         <command id="ignis.java.library.getPackages" />
+         <command id="ignis.java.library.getClasses" />
+      </delegateCommandHandler>
+   </extension>
+</plugin>

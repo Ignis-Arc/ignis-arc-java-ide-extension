@@ -1,0 +1,25 @@
+# Dependencies
+node_modules/
+bun.lockb
+
+# TypeScript Output
+dist/
+out/
+
+# Java Compilation
+server-project/bin/
+server-project/lib/
+
+# Packaged Extensions
+*.vsix
+
+# OS files
+.DS_Store
+Thumbs.db
+*.log
+
+# VS Code temporary files
+.vscode/*
+!.vscode/extensions.json
+!.vscode/launch.json
+!.vscode/tasks.json

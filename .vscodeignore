@@ -1,0 +1,9 @@
+.vscode/**
+.git/**
+node_modules/**
+src/**
+server-project/**
+tsconfig.json
+bun.lock
+build.sh
+pack.sh

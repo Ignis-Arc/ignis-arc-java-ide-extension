@@ -1,0 +1,82 @@
+{
+  "name": "ignis-arc-java-ide-extension",
+  "displayName": "Ignis Arc Java IDE Extension Pack",
+  "description": "Premium Java IDE additions featuring active-theme project navigation and real-time method complexity Code Lenses.",
+  "version": "0.1.0",
+  "publisher": "ignis-arc-digital",
+  "icon": "icons/ignis-logo.png",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/orgs/Ignis-Arc/ignis-arc-java-ide-extension.git"
+  },
+  "engines": {
+    "vscode": "^1.77.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Linters",
+    "Visualization"
+  ],
+  "activationEvents": [
+    "onLanguage:java",
+    "onView:ignisJavaProjectNavigator",
+    "workspaceContains:pom.xml",
+    "workspaceContains:build.gradle",
+    "workspaceContains:build.gradle.kts",
+    "workspaceContains:src/**/*.java"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "javaExtensions": [
+      "./server/ignis-java-suite-backend.jar"
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "ignis-arc-java-ide",
+          "title": "Ignis Arc Java",
+          "icon": "icons/ignis-logo.svg"
+        }
+      ]
+    },
+    "views": {
+      "ignis-arc-java-ide": [
+        {
+          "id": "ignisJavaProjectNavigator",
+          "name": "Ignis Arc Java Explorer",
+          "when": "ignisJava:isJavaProject"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Ignis Arc Java IDE",
+      "properties": {
+        "ignis.java.complexity.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable showing cyclomatic complexity lenses above Java methods."
+        },
+        "ignis.java.complexity.highThreshold": {
+          "type": "integer",
+          "default": 10,
+          "description": "Threshold for high complexity warnings."
+        },
+        "ignis.java.complexity.mediumThreshold": {
+          "type": "integer",
+          "default": 5,
+          "description": "Threshold for moderate complexity."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@types/node": "^16.11.7",
+    "@types/vscode": "^1.77.0",
+    "typescript": "^4.9.5"
+  }
+}
