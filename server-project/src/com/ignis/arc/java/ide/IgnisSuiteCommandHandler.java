@@ -152,78 +152,59 @@ public class IgnisSuiteCommandHandler implements IDelegateCommandHandler {
     }
 
     private Object getProjectLibraries(List<Object> arguments) throws Exception {
-        if (arguments == null || arguments.isEmpty()) {
-            return null;
-        }
-        String projectPath = (String) arguments.get(0);
-        File queryDir = new File(projectPath).getCanonicalFile();
-        
-        List<IProject> matchingProjects = new ArrayList<>();
-        for (IProject p : ResourcesPlugin.getWorkspace().getRoot().getProjects()) {
-            if (p.isOpen() && p.hasNature(JavaCore.NATURE_ID)) {
-                try {
-                    File projDir = p.getLocation().toFile().getCanonicalFile();
-                    // Match if project directory is equal to or a subdirectory of the query directory
-                    if (isSubdirectory(queryDir, projDir)) {
-                        matchingProjects.add(p);
-                    }
-                } catch (Exception e) {
-                    // ignore
-                }
-            }
-        }
-        
-        if (matchingProjects.isEmpty()) {
-            return null;
-        }
-
         Map<String, Object> result = new HashMap<>();
         List<Map<String, Object>> systemLibs = new ArrayList<>();
         List<Map<String, Object>> userLibs = new ArrayList<>();
         String jreName = "JRE System Library";
 
-        for (IProject project : matchingProjects) {
-            IJavaProject javaProject = JavaCore.create(project);
-            
-            // Try to find JRE name from the first matching project
-            if ("JRE System Library".equals(jreName)) {
-                try {
-                    for (IClasspathEntry entry : javaProject.getRawClasspath()) {
-                        if (entry.getEntryKind() == IClasspathEntry.CPE_CONTAINER) {
-                            if (entry.getPath().toString().contains("org.eclipse.jdt.launching.JRE_CONTAINER")) {
-                                IClasspathContainer container = JavaCore.getClasspathContainer(entry.getPath(), javaProject);
-                                if (container != null) {
-                                    jreName = container.getDescription();
-                                    break;
+        for (IProject project : ResourcesPlugin.getWorkspace().getRoot().getProjects()) {
+            if (project.isOpen() && project.hasNature(JavaCore.NATURE_ID)) {
+                IJavaProject javaProject = JavaCore.create(project);
+                
+                // Try to find JRE name from the classpath
+                if ("JRE System Library".equals(jreName)) {
+                    try {
+                        for (IClasspathEntry entry : javaProject.getRawClasspath()) {
+                            if (entry.getEntryKind() == IClasspathEntry.CPE_CONTAINER) {
+                                if (entry.getPath().toString().contains("org.eclipse.jdt.launching.JRE_CONTAINER")) {
+                                    IClasspathContainer container = JavaCore.getClasspathContainer(entry.getPath(), javaProject);
+                                    if (container != null) {
+                                        jreName = container.getDescription();
+                                        break;
+                                    }
                                 }
+                            }
+                        }
+                    } catch (Exception e) {
+                        // ignore
+                    }
+                }
+
+                try {
+                    IPackageFragmentRoot[] roots = javaProject.getPackageFragmentRoots();
+                    for (IPackageFragmentRoot root : roots) {
+                        if (root.getKind() == IPackageFragmentRoot.K_BINARY) {
+                            Map<String, Object> libMap = new HashMap<>();
+                            libMap.put("name", root.getElementName());
+                            libMap.put("path", root.getPath().toOSString());
+                            libMap.put("id", root.getHandleIdentifier());
+
+                            // Classify library: System JDK/JRE vs Referenced Libraries
+                            boolean isSystem = false;
+                            String pathStr = root.getPath().toOSString().toLowerCase();
+                            if (pathStr.contains("jre") || pathStr.contains("jdk") || pathStr.contains("java-") || pathStr.contains("rt.jar")) {
+                                isSystem = true;
+                            }
+
+                            if (isSystem) {
+                                systemLibs.add(libMap);
+                            } else {
+                                userLibs.add(libMap);
                             }
                         }
                     }
                 } catch (Exception e) {
                     // ignore
-                }
-            }
-
-            IPackageFragmentRoot[] roots = javaProject.getPackageFragmentRoots();
-            for (IPackageFragmentRoot root : roots) {
-                if (root.getKind() == IPackageFragmentRoot.K_BINARY) {
-                    Map<String, Object> libMap = new HashMap<>();
-                    libMap.put("name", root.getElementName());
-                    libMap.put("path", root.getPath().toOSString());
-                    libMap.put("id", root.getHandleIdentifier());
-
-                    // Classify library: System JDK/JRE vs Referenced Libraries
-                    boolean isSystem = false;
-                    String pathStr = root.getPath().toOSString().toLowerCase();
-                    if (pathStr.contains("jre") || pathStr.contains("jdk") || pathStr.contains("java-") || pathStr.contains("rt.jar")) {
-                        isSystem = true;
-                    }
-
-                    if (isSystem) {
-                        systemLibs.add(libMap);
-                    } else {
-                        userLibs.add(libMap);
-                    }
                 }
             }
         }
@@ -232,17 +213,6 @@ public class IgnisSuiteCommandHandler implements IDelegateCommandHandler {
         result.put("systemLibraries", systemLibs);
         result.put("referencedLibraries", userLibs);
         return result;
-    }
-
-    private boolean isSubdirectory(File parent, File child) {
-        File f = child;
-        while (f != null) {
-            if (f.equals(parent)) {
-                return true;
-            }
-            f = f.getParentFile();
-        }
-        return false;
     }
 
     private Object getLibraryPackages(List<Object> arguments) throws Exception {
