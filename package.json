@@ -3,7 +3,7 @@
   "displayName": "Ignis Arc Java IDE Extension Pack",
   "description": "Premium Java IDE additions featuring active-theme project navigation and real-time method complexity Code Lenses.",
   "version": "0.1.0",
-  "publisher": "ignis-arc-digital",
+  "publisher": "lukeme1107",
   "license": "MIT",
   "icon": "icons/ignis-logo.png",
   "repository": {
