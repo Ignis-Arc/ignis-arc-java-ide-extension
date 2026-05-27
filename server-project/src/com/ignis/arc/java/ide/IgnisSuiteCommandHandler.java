@@ -220,7 +220,24 @@ public class IgnisSuiteCommandHandler implements IDelegateCommandHandler {
             return null;
         }
         String handleId = (String) arguments.get(0);
-        IPackageFragmentRoot root = (IPackageFragmentRoot) JavaCore.create(handleId);
+        IPackageFragmentRoot root = null;
+        
+        if (handleId.startsWith("=") || handleId.startsWith("[")) {
+            root = (IPackageFragmentRoot) JavaCore.create(handleId);
+        } else {
+            // It's an absolute path!
+            org.eclipse.core.runtime.IPath path = org.eclipse.core.runtime.Path.fromOSString(handleId);
+            for (IProject project : ResourcesPlugin.getWorkspace().getRoot().getProjects()) {
+                if (project.isOpen() && project.hasNature(JavaCore.NATURE_ID)) {
+                    IJavaProject javaProject = JavaCore.create(project);
+                    root = javaProject.findPackageFragmentRoot(path);
+                    if (root != null && root.exists()) {
+                        break;
+                    }
+                }
+            }
+        }
+
         if (root == null || !root.exists()) {
             return null;
         }

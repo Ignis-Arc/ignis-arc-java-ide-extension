@@ -212,14 +212,73 @@ class IgnisJavaProjectTreeDataProvider implements vscode.TreeDataProvider<IgnisJ
             return this.projectLibrariesCache.get(projectPath);
         }
         try {
-            const libs = await vscode.commands.executeCommand<any>(
-                'java.execute.workspaceCommand',
-                'ignis.java.project.getLibraries',
-                projectPath
-            );
-            if (libs) {
-                this.projectLibrariesCache.set(projectPath, libs);
-                return libs;
+            const javaExtension = vscode.extensions.getExtension('redhat.java');
+            if (javaExtension && javaExtension.isActive) {
+                const api = javaExtension.exports;
+                if (api && typeof api.getClasspaths === 'function') {
+                    const projectUri = vscode.Uri.file(projectPath).toString();
+                    const classpathResult = await api.getClasspaths(projectUri, { scope: 'test' });
+                    if (classpathResult) {
+                        const classpaths = classpathResult.classpaths || [];
+                        const modulepaths = classpathResult.modulepaths || [];
+                        const allPaths = [...classpaths, ...modulepaths];
+
+                        const systemLibraries: any[] = [];
+                        const referencedLibraries: any[] = [];
+
+                        const isSystemJar = (jarPath: string): boolean => {
+                            const lower = jarPath.toLowerCase();
+                            return lower.includes('jre') || 
+                                   lower.includes('jdk') || 
+                                   lower.includes('java-') || 
+                                   lower.includes('rt.jar') || 
+                                   lower.includes('jrt-fs') || 
+                                   lower.includes('/jvm/') || 
+                                   lower.includes('/jdk/') || 
+                                   lower.includes('/jre/');
+                        };
+
+                        for (const p of allPaths) {
+                            if (p.endsWith('.jar')) {
+                                const name = path.basename(p);
+                                const libNode = {
+                                    name: name,
+                                    path: p,
+                                    id: p // Use absolute file path as handle ID
+                                };
+                                if (isSystemJar(p)) {
+                                    systemLibraries.push(libNode);
+                                } else {
+                                    referencedLibraries.push(libNode);
+                                }
+                            }
+                        }
+
+                        // Avoid caching empty lists while JDT LS is still loading/importing
+                        if (systemLibraries.length === 0 && referencedLibraries.length === 0) {
+                            return null;
+                        }
+
+                        let jreName = 'JDK System Library';
+                        const firstSystem = systemLibraries.find(lib => lib.path);
+                        if (firstSystem) {
+                            const parts = firstSystem.path.split(path.sep);
+                            const jvmIdx = parts.findIndex((part: string) => part.includes('jvm') || part.includes('java-') || part.includes('jdk') || part.includes('jre'));
+                            if (jvmIdx !== -1 && jvmIdx + 1 < parts.length) {
+                                jreName = `JDK System Library [${parts[jvmIdx + 1]}]`;
+                            }
+                        }
+
+                        const libs = {
+                            jreName: jreName,
+                            systemLibraries: systemLibraries,
+                            referencedLibraries: referencedLibraries
+                        };
+
+                        this.projectLibrariesCache.set(projectPath, libs);
+                        return libs;
+                    }
+                }
             }
         } catch (e) {
             console.error('Failed to fetch project libraries for:', projectPath, e);
