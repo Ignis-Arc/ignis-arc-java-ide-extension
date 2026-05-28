@@ -2,7 +2,7 @@
   "name": "ignis-arc-java-ide-extension",
   "displayName": "Ignis Arc Java IDE Extension Pack",
   "description": "Premium Java IDE additions featuring active-theme project navigation and real-time method complexity Code Lenses.",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "publisher": "lukeme1107",
   "license": "MIT",
   "icon": "icons/ignis-logo.png",
@@ -123,6 +123,11 @@
           "type": "boolean",
           "default": true,
           "description": "Enable showing dynamic references/usages Code Lenses above Java classes, methods, and fields."
+        },
+        "ignis.java.bytecode.filterLombok": {
+          "type": "boolean",
+          "default": true,
+          "description": "Filter out Lombok generated getters, setters, builders, and other compiler synthesized methods."
         }
       }
     }

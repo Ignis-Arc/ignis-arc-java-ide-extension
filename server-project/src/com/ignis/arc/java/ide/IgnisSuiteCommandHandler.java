@@ -461,9 +461,22 @@ public class IgnisSuiteCommandHandler implements IDelegateCommandHandler {
             }
             final Integer line = lineVal;
 
+            boolean filterLombokVal = true;
+            if (arguments.size() > 2 && arguments.get(2) != null) {
+                Object filterArg = arguments.get(2);
+                if (filterArg instanceof Boolean) {
+                    filterLombokVal = (Boolean) filterArg;
+                } else if (filterArg instanceof String) {
+                    filterLombokVal = Boolean.parseBoolean((String) filterArg);
+                }
+            }
+            final boolean finalFilterLombok = filterLombokVal;
+
             byte[] classBytes = null;
             String methodName = null;
             String methodDesc = null;
+
+            final List<String> handwrittenMethods = new ArrayList<>();
 
             ICompilationUnit unit = JDTUtils.resolveCompilationUnit(fileUri);
             if (unit != null) {
@@ -471,6 +484,15 @@ public class IgnisSuiteCommandHandler implements IDelegateCommandHandler {
                 parser.setSource(unit);
                 parser.setResolveBindings(true);
                 CompilationUnit astRoot = (CompilationUnit) parser.createAST(monitor);
+
+                // Collect all handwritten method names for Lombok/synthetic filtering
+                astRoot.accept(new ASTVisitor() {
+                    @Override
+                    public boolean visit(MethodDeclaration node) {
+                        handwrittenMethods.add(node.getName().getIdentifier());
+                        return true;
+                    }
+                });
 
                 AbstractTypeDeclaration targetType = null;
 
@@ -543,7 +565,13 @@ public class IgnisSuiteCommandHandler implements IDelegateCommandHandler {
                 java.io.PrintWriter pw = new java.io.PrintWriter(sw);
 
                 if (methodName != null) {
-                    Printer printer = new Textifier();
+                    Printer printer = new Textifier(Opcodes.ASM9) {
+                        @Override
+                        public void visitLineNumber(int line, Label start) {
+                            getText().add("    // IgnisSrcLine: " + line + "\n");
+                            super.visitLineNumber(line, start);
+                        }
+                    };
                     MethodBytecodeExtractor extractor = new MethodBytecodeExtractor(printer, pw, methodName, methodDesc);
                     cr.accept(extractor, 0);
                     bytecodeText = sw.toString();
@@ -552,9 +580,43 @@ public class IgnisSuiteCommandHandler implements IDelegateCommandHandler {
                 if (bytecodeText == null || bytecodeText.trim().isEmpty()) {
                     java.io.StringWriter swFull = new java.io.StringWriter();
                     java.io.PrintWriter pwFull = new java.io.PrintWriter(swFull);
-                    TraceClassVisitor tcv = new TraceClassVisitor(pwFull);
-                    cr.accept(tcv, 0);
+                    
+                    Textifier textifier = new Textifier(Opcodes.ASM9) {
+                        @Override
+                        protected Textifier createTextifier() {
+                            return new Textifier(Opcodes.ASM9) {
+                                @Override
+                                public void visitLineNumber(int line, Label start) {
+                                    getText().add("    // IgnisSrcLine: " + line + "\n");
+                                    super.visitLineNumber(line, start);
+                                }
+                            };
+                        }
+                    };
+                    
+                    TraceClassVisitor tcv = new TraceClassVisitor(null, textifier, pwFull);
+                    
+                    // Hook custom OSGi filter ClassVisitor
+                    final List<String> finalHandwritten = handwrittenMethods;
+                    ClassVisitor filterCV = new ClassVisitor(Opcodes.ASM9, tcv) {
+                        @Override
+                        public MethodVisitor visitMethod(int access, String name, String descriptor, String signature, String[] exceptions) {
+                            if (finalFilterLombok && !finalHandwritten.isEmpty()) {
+                                boolean isHandwritten = finalHandwritten.contains(name) || "<init>".equals(name) || "<clinit>".equals(name);
+                                if (!isHandwritten) {
+                                    return null; // Skip this Lombok/synthetic method completely
+                                }
+                            }
+                            return super.visitMethod(access, name, descriptor, signature, exceptions);
+                        }
+                    };
+                    
+                    cr.accept(filterCV, 0);
                     bytecodeText = swFull.toString();
+                    
+                    // Prepend Constant Pool Explorer table to full class decompilation
+                    String cpSection = ConstantPoolParser.parse(classBytes);
+                    bytecodeText = cpSection + bytecodeText;
                 }
             } catch (Exception e) {
                 return header + "// Error textifying bytecode: " + e.getMessage();
@@ -612,6 +674,110 @@ public class IgnisSuiteCommandHandler implements IDelegateCommandHandler {
             return null;
         }
         return java.nio.file.Files.readAllBytes(classFile.toPath());
+    }
+
+    public static class ConstantPoolParser {
+        public static String parse(byte[] bytes) {
+            try {
+                if (bytes == null || bytes.length < 10) return "";
+                java.io.DataInputStream in = new java.io.DataInputStream(new java.io.ByteArrayInputStream(bytes));
+                if (in.readInt() != 0xCAFEBABE) return "";
+                in.readUnsignedShort(); // minor
+                in.readUnsignedShort(); // major
+                int cpCount = in.readUnsignedShort();
+                
+                int[] tags = new int[cpCount];
+                int[][] refs = new int[cpCount][2];
+                String[] strings = new String[cpCount];
+                
+                for (int i = 1; i < cpCount; i++) {
+                    int tag = in.readUnsignedByte();
+                    tags[i] = tag;
+                    switch (tag) {
+                        case 1: // UTF8
+                            strings[i] = in.readUTF();
+                            break;
+                        case 3: // Integer
+                        case 4: // Float
+                            in.readInt();
+                            break;
+                        case 5: // Long
+                        case 6: // Double
+                            in.readLong();
+                            i++; // double slot
+                            break;
+                        case 7: // Class
+                        case 8: // String
+                        case 16: // MethodType
+                        case 19: // Module
+                        case 20: // Package
+                            refs[i][0] = in.readUnsignedShort();
+                            break;
+                        case 9: // Fieldref
+                        case 10: // Methodref
+                        case 11: // InterfaceMethodref
+                        case 12: // NameAndType
+                        case 17: // Dynamic
+                        case 18: // InvokeDynamic
+                            refs[i][0] = in.readUnsignedShort();
+                            refs[i][1] = in.readUnsignedShort();
+                            break;
+                        case 15: // MethodHandle
+                            in.readUnsignedByte();
+                            refs[i][0] = in.readUnsignedShort();
+                            break;
+                        default:
+                            return ""; // unknown tag, abort
+                    }
+                }
+                
+                StringBuilder sb = new StringBuilder();
+                sb.append("// ==========================================\n");
+                sb.append("// Constant Pool:\n");
+                sb.append("// ==========================================\n");
+                for (int i = 1; i < cpCount; i++) {
+                    int tag = tags[i];
+                    if (tag == 0) continue;
+                    sb.append(String.format("// #%-4d = ", i));
+                    switch (tag) {
+                        case 1:
+                            sb.append(String.format("%-18s \"%s\"", "Utf8", strings[i].replace("\n", "\\n")));
+                            break;
+                        case 7:
+                            int classRef = refs[i][0];
+                            sb.append(String.format("%-18s #%-12d // %s", "Class", classRef, strings[classRef]));
+                            break;
+                        case 8:
+                            int strRef = refs[i][0];
+                            sb.append(String.format("%-18s #%-12d // \"%s\"", "String", strRef, strings[strRef]));
+                            break;
+                        case 9:
+                            sb.append(String.format("%-18s #%d.#%d", "Fieldref", refs[i][0], refs[i][1]));
+                            break;
+                        case 10:
+                            sb.append(String.format("%-18s #%d.#%d", "Methodref", refs[i][0], refs[i][1]));
+                            break;
+                        case 11:
+                            sb.append(String.format("%-18s #%d.#%d", "InterfaceMethodref", refs[i][0], refs[i][1]));
+                            break;
+                        case 12:
+                            sb.append(String.format("%-18s #%d:#%d", "NameAndType", refs[i][0], refs[i][1]));
+                            break;
+                        case 18:
+                            sb.append(String.format("%-18s #%d:#%d", "InvokeDynamic", refs[i][0], refs[i][1]));
+                            break;
+                        default:
+                            sb.append("Other");
+                            break;
+                    }
+                    sb.append("\n");
+                }
+                sb.append("// ==========================================\n\n");
+                return sb.toString();
+            } catch (Exception e) {
+                return "// Error parsing Constant Pool: " + e.getMessage() + "\n\n";
+            }
+        }
     }
 
     private String getMethodDescriptor(IMethodBinding methodBinding) {
