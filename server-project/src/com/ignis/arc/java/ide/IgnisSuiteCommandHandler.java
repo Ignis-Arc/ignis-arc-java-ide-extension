@@ -567,9 +567,8 @@ public class IgnisSuiteCommandHandler implements IDelegateCommandHandler {
                 if (methodName != null) {
                     Printer printer = new Textifier(Opcodes.ASM9) {
                         @Override
-                        public void visitLineNumber(int line, Label start) {
-                            getText().add("    // IgnisSrcLine: " + line + "\n");
-                            super.visitLineNumber(line, start);
+                        protected Textifier createTextifier() {
+                            return new IgnisMethodTextifier();
                         }
                     };
                     MethodBytecodeExtractor extractor = new MethodBytecodeExtractor(printer, pw, methodName, methodDesc);
@@ -584,13 +583,7 @@ public class IgnisSuiteCommandHandler implements IDelegateCommandHandler {
                     Textifier textifier = new Textifier(Opcodes.ASM9) {
                         @Override
                         protected Textifier createTextifier() {
-                            return new Textifier(Opcodes.ASM9) {
-                                @Override
-                                public void visitLineNumber(int line, Label start) {
-                                    getText().add("    // IgnisSrcLine: " + line + "\n");
-                                    super.visitLineNumber(line, start);
-                                }
-                            };
+                            return new IgnisMethodTextifier();
                         }
                     };
                     
@@ -862,6 +855,61 @@ public class IgnisSuiteCommandHandler implements IDelegateCommandHandler {
                     return String.valueOf(majorVersion - 44);
                 }
                 return "Unknown";
+        }
+    }
+
+    public static class IgnisMethodTextifier extends Textifier {
+        private final List<String[]> lvt = new ArrayList<>();
+
+        public IgnisMethodTextifier() {
+            super(Opcodes.ASM9);
+        }
+
+        @Override
+        public void visitLineNumber(int line, Label start) {
+            getText().add("    // IgnisSrcLine: " + line + "\n");
+            super.visitLineNumber(line, start);
+        }
+
+        @Override
+        public void visitLocalVariable(String name, String desc, String signature, Label start, Label end, int index) {
+            lvt.add(new String[] { String.valueOf(index), name, desc });
+            super.visitLocalVariable(name, desc, signature, start, end, index);
+        }
+
+        @Override
+        public void visitMethodEnd() {
+            if (!lvt.isEmpty()) {
+                // Sort LVT by slot index numerically
+                lvt.sort((a, b) -> {
+                    try {
+                        return Integer.compare(Integer.parseInt(a[0]), Integer.parseInt(b[0]));
+                    } catch (Exception e) {
+                        return a[0].compareTo(b[0]);
+                    }
+                });
+
+                StringBuilder sb = new StringBuilder();
+                sb.append("    // 📍 Local Variable Table (LVT):\n");
+                sb.append("    // [Slot]  [Name]               [Type Descriptor]\n");
+                for (String[] row : lvt) {
+                    String slot = row[0];
+                    String varName = row[1];
+                    String varType = row[2];
+
+                    String paddedSlot = String.format("%-6s", slot);
+                    String paddedName = String.format("%-18s", varName);
+                    sb.append("    //   ").append(paddedSlot).append(" ").append(paddedName).append(" ").append(varType).append("\n");
+                }
+                sb.append("\n");
+                getText().add(0, sb.toString());
+            }
+            super.visitMethodEnd();
+        }
+
+        @Override
+        protected Textifier createTextifier() {
+            return new IgnisMethodTextifier();
         }
     }
 
