@@ -11,5 +11,7 @@ Require-Bundle: org.eclipse.jdt.ls.core,
  org.eclipse.jdt.core,
  org.eclipse.core.runtime,
  org.eclipse.core.resources,
- org.eclipse.osgi
+ org.eclipse.osgi,
+ org.objectweb.asm,
+ org.objectweb.asm.util
 Export-Package: com.ignis.arc.java.ide

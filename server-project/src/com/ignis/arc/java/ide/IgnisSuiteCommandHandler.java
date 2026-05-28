@@ -12,6 +12,8 @@ import org.eclipse.jdt.core.*;
 import org.eclipse.jdt.core.dom.*;
 import org.eclipse.jdt.ls.core.internal.IDelegateCommandHandler;
 import org.eclipse.jdt.ls.core.internal.JDTUtils;
+import org.objectweb.asm.*;
+import org.objectweb.asm.util.*;
 
 public class IgnisSuiteCommandHandler implements IDelegateCommandHandler {
 
@@ -29,6 +31,8 @@ public class IgnisSuiteCommandHandler implements IDelegateCommandHandler {
             return getLibraryClasses(arguments);
         } else if ("ignis.java.complexity.scanWorkspace".equals(commandId)) {
             return scanWorkspaceComplexity(arguments, monitor);
+        } else if ("ignis.java.bytecode.get".equals(commandId)) {
+            return getBytecode(arguments, monitor);
         }
         throw new UnsupportedOperationException("Unsupported command: " + commandId);
     }
@@ -429,5 +433,300 @@ public class IgnisSuiteCommandHandler implements IDelegateCommandHandler {
                 return true;
             }
         });
+    }
+
+    private Object getBytecode(List<Object> arguments, IProgressMonitor monitor) {
+        try {
+            if (arguments == null || arguments.isEmpty()) {
+                return "// Error: arguments list is null or empty.";
+            }
+            Object firstArg = arguments.get(0);
+            if (firstArg == null) {
+                return "// Error: First argument (fileUri) is null.";
+            }
+            String fileUri = firstArg.toString();
+
+            Integer lineVal = null;
+            if (arguments.size() > 1 && arguments.get(1) != null) {
+                Object lineArg = arguments.get(1);
+                if (lineArg instanceof Number) {
+                    lineVal = ((Number) lineArg).intValue();
+                } else if (lineArg instanceof String) {
+                    try {
+                        lineVal = Integer.parseInt((String) lineArg);
+                    } catch (NumberFormatException e) {
+                        // ignore
+                    }
+                }
+            }
+            final Integer line = lineVal;
+
+            byte[] classBytes = null;
+            String methodName = null;
+            String methodDesc = null;
+
+            ICompilationUnit unit = JDTUtils.resolveCompilationUnit(fileUri);
+            if (unit != null) {
+                ASTParser parser = ASTParser.newParser(AST.JLS17);
+                parser.setSource(unit);
+                parser.setResolveBindings(true);
+                CompilationUnit astRoot = (CompilationUnit) parser.createAST(monitor);
+
+                AbstractTypeDeclaration targetType = null;
+
+                if (line != null) {
+                    final int targetLine = line;
+                    final MethodDeclaration[] targetNode = new MethodDeclaration[1];
+                    astRoot.accept(new ASTVisitor() {
+                        @Override
+                        public boolean visit(MethodDeclaration node) {
+                            if (node.getBody() == null) {
+                                return true;
+                            }
+                            int startLine = astRoot.getLineNumber(node.getStartPosition());
+                            int endLine = astRoot.getLineNumber(node.getStartPosition() + node.getLength());
+                            if (targetLine >= startLine && targetLine <= endLine) {
+                                targetNode[0] = node;
+                            }
+                            return true;
+                        }
+                    });
+
+                    if (targetNode[0] != null) {
+                        IMethodBinding methodBinding = targetNode[0].resolveBinding();
+                        methodName = targetNode[0].getName().getIdentifier();
+                        methodDesc = (methodBinding != null) ? getMethodDescriptor(methodBinding) : null;
+
+                        ASTNode parent = targetNode[0].getParent();
+                        while (parent != null) {
+                            if (parent instanceof AbstractTypeDeclaration) {
+                                targetType = (AbstractTypeDeclaration) parent;
+                                break;
+                            }
+                            parent = parent.getParent();
+                        }
+                    }
+                }
+
+                if (targetType == null && !astRoot.types().isEmpty()) {
+                    targetType = (AbstractTypeDeclaration) astRoot.types().get(0);
+                }
+
+                if (targetType != null) {
+                    ITypeBinding typeBinding = targetType.resolveBinding();
+                    classBytes = getClassBytesForType(typeBinding, unit.getJavaProject());
+                }
+            } else {
+                IClassFile classFile = JDTUtils.resolveClassFile(fileUri);
+                if (classFile != null) {
+                    classBytes = classFile.getBytes();
+                }
+            }
+
+            if (classBytes == null) {
+                return "// Error: Could not find compiled class bytes for: " + fileUri 
+                    + "\n// Is active unit resolved: " + (unit != null)
+                    + "\n// Please make sure the Java project builds without errors and the class file is generated.";
+            }
+
+            int majorVersion = 0;
+            if (classBytes.length > 7) {
+                majorVersion = ((classBytes[6] & 0xFF) << 8) | (classBytes[7] & 0xFF);
+            }
+            String javaVer = getJavaVersion(majorVersion);
+            String header = "// Compiled with Java " + javaVer + " (major version " + majorVersion + ")\n\n";
+
+            String bytecodeText = null;
+            try {
+                ClassReader cr = new ClassReader(classBytes);
+                java.io.StringWriter sw = new java.io.StringWriter();
+                java.io.PrintWriter pw = new java.io.PrintWriter(sw);
+
+                if (methodName != null) {
+                    Printer printer = new Textifier();
+                    MethodBytecodeExtractor extractor = new MethodBytecodeExtractor(printer, pw, methodName, methodDesc);
+                    cr.accept(extractor, 0);
+                    bytecodeText = sw.toString();
+                }
+
+                if (bytecodeText == null || bytecodeText.trim().isEmpty()) {
+                    java.io.StringWriter swFull = new java.io.StringWriter();
+                    java.io.PrintWriter pwFull = new java.io.PrintWriter(swFull);
+                    TraceClassVisitor tcv = new TraceClassVisitor(pwFull);
+                    cr.accept(tcv, 0);
+                    bytecodeText = swFull.toString();
+                }
+            } catch (Exception e) {
+                return header + "// Error textifying bytecode: " + e.getMessage();
+            }
+
+            return header + bytecodeText;
+        } catch (Throwable t) {
+            java.io.StringWriter sw = new java.io.StringWriter();
+            java.io.PrintWriter pw = new java.io.PrintWriter(sw);
+            t.printStackTrace(pw);
+            return "// Unexpected exception in getBytecode:\n// " + sw.toString().replace("\n", "\n// ");
+        }
+    }
+
+    private byte[] getClassBytesForType(ITypeBinding typeBinding, IJavaProject javaProject) throws Exception {
+        if (typeBinding == null) {
+            return null;
+        }
+        String binaryName = typeBinding.getBinaryName();
+        if (binaryName == null) {
+            return null;
+        }
+
+        IPackageFragmentRoot root = null;
+        IJavaElement javaElement = typeBinding.getJavaElement();
+        if (javaElement instanceof IType) {
+            IType jdtType = (IType) javaElement;
+            root = (IPackageFragmentRoot) jdtType.getAncestor(IJavaElement.PACKAGE_FRAGMENT_ROOT);
+        }
+
+        org.eclipse.core.runtime.IPath outputPath = null;
+        if (root != null) {
+            try {
+                IClasspathEntry classpathEntry = root.getRawClasspathEntry();
+                if (classpathEntry != null) {
+                    outputPath = classpathEntry.getOutputLocation();
+                }
+            } catch (Exception e) {
+                // ignore
+            }
+        }
+        if (outputPath == null) {
+            outputPath = javaProject.getOutputLocation();
+        }
+
+        org.eclipse.core.resources.IWorkspaceRoot workspaceRoot = ResourcesPlugin.getWorkspace().getRoot();
+        org.eclipse.core.resources.IResource outputResource = workspaceRoot.findMember(outputPath);
+        if (outputResource == null || outputResource.getLocation() == null) {
+            return null;
+        }
+        File outputFolder = outputResource.getLocation().toFile();
+        String classRelativePath = binaryName.replace('.', '/') + ".class";
+        File classFile = new File(outputFolder, classRelativePath);
+        if (!classFile.exists()) {
+            return null;
+        }
+        return java.nio.file.Files.readAllBytes(classFile.toPath());
+    }
+
+    private String getMethodDescriptor(IMethodBinding methodBinding) {
+        if (methodBinding == null) {
+            return null;
+        }
+        StringBuilder sb = new StringBuilder();
+        sb.append("(");
+        for (ITypeBinding param : methodBinding.getParameterTypes()) {
+            sb.append(getDescriptor(param));
+        }
+        sb.append(")");
+        sb.append(getDescriptor(methodBinding.getReturnType()));
+        return sb.toString();
+    }
+
+    private String getDescriptor(ITypeBinding type) {
+        if (type == null) {
+            return "";
+        }
+        if (type.isPrimitive()) {
+            String name = type.getName();
+            switch (name) {
+                case "void": return "V";
+                case "boolean": return "Z";
+                case "char": return "C";
+                case "byte": return "B";
+                case "short": return "S";
+                case "int": return "I";
+                case "float": return "F";
+                case "long": return "J";
+                case "double": return "D";
+                default: return "";
+            }
+        } else if (type.isArray()) {
+            StringBuilder sb = new StringBuilder();
+            for (int i = 0; i < type.getDimensions(); i++) {
+                sb.append("[");
+            }
+            sb.append(getDescriptor(type.getElementType()));
+            return sb.toString();
+        } else {
+            ITypeBinding erasure = type.getErasure();
+            String binaryName = erasure.getBinaryName();
+            if (binaryName == null) {
+                binaryName = erasure.getQualifiedName();
+                if (binaryName == null || binaryName.isEmpty()) {
+                    binaryName = "java.lang.Object";
+                }
+            }
+            return "L" + binaryName.replace('.', '/') + ";";
+        }
+    }
+
+    private String getJavaVersion(int majorVersion) {
+        switch (majorVersion) {
+            case 45: return "1.1";
+            case 46: return "1.2";
+            case 47: return "1.3";
+            case 48: return "1.4";
+            case 49: return "5";
+            case 50: return "6";
+            case 51: return "7";
+            case 52: return "8";
+            case 53: return "9";
+            case 54: return "10";
+            case 55: return "11";
+            case 56: return "12";
+            case 57: return "13";
+            case 58: return "14";
+            case 59: return "15";
+            case 60: return "16";
+            case 61: return "17";
+            case 62: return "18";
+            case 63: return "19";
+            case 64: return "20";
+            case 65: return "21";
+            case 66: return "22";
+            case 67: return "23";
+            default:
+                if (majorVersion > 44) {
+                    return String.valueOf(majorVersion - 44);
+                }
+                return "Unknown";
+        }
+    }
+
+    public static class MethodBytecodeExtractor extends ClassVisitor {
+        private final String targetMethodName;
+        private final String targetMethodDesc;
+        private final Printer printer;
+        private final java.io.PrintWriter printWriter;
+
+        public MethodBytecodeExtractor(Printer printer, java.io.PrintWriter printWriter, String targetMethodName, String targetMethodDesc) {
+            super(Opcodes.ASM9);
+            this.printer = printer;
+            this.printWriter = printWriter;
+            this.targetMethodName = targetMethodName;
+            this.targetMethodDesc = targetMethodDesc;
+        }
+
+        @Override
+        public MethodVisitor visitMethod(int access, String name, String descriptor, String signature, String[] exceptions) {
+            if (name.equals(targetMethodName) && (targetMethodDesc == null || descriptor.equals(targetMethodDesc))) {
+                Printer methodPrinter = printer.visitMethod(access, name, descriptor, signature, exceptions);
+                return new TraceMethodVisitor(methodPrinter);
+            }
+            return null;
+        }
+
+        @Override
+        public void visitEnd() {
+            printer.visitClassEnd();
+            printer.print(printWriter);
+            printWriter.flush();
+        }
     }
 }

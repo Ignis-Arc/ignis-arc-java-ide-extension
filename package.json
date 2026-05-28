@@ -2,7 +2,7 @@
   "name": "ignis-arc-java-ide-extension",
   "displayName": "Ignis Arc Java IDE Extension Pack",
   "description": "Premium Java IDE additions featuring active-theme project navigation and real-time method complexity Code Lenses.",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "publisher": "lukeme1107",
   "license": "MIT",
   "icon": "icons/ignis-logo.png",
@@ -45,6 +45,11 @@
         "command": "ignis.java.complexity.refresh",
         "title": "Refresh List",
         "icon": "$(refresh)"
+      },
+      {
+        "command": "ignis.java.bytecode.view",
+        "title": "View JVM Bytecode",
+        "icon": "$(sync)"
       }
     ],
     "menus": {
@@ -58,6 +63,13 @@
           "command": "ignis.java.complexity.refresh",
           "group": "navigation",
           "when": "view == ignisJavaComplexityAnalyzer"
+        }
+      ],
+      "editor/title": [
+        {
+          "command": "ignis.java.bytecode.view",
+          "group": "navigation",
+          "when": "editorLangId == java || resourceScheme == jdt"
         }
       ]
     },

@@ -3,6 +3,8 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 let jdtlsReady = false;
+let complexityCodeLensProvider: JavaComplexityCodeLensProvider | undefined;
+let referencesCodeLensProvider: JavaReferencesCodeLensProvider | undefined;
 
 // ==========================================
 // 1. Complexity Lenses Code
@@ -44,6 +46,8 @@ function registerComplexityLens(context: vscode.ExtensionContext) {
     const docSelector: vscode.DocumentSelector = { scheme: 'file', language: 'java' };
     const codeLensProvider = new JavaComplexityCodeLensProvider();
     const referencesLensProvider = new JavaReferencesCodeLensProvider();
+    complexityCodeLensProvider = codeLensProvider;
+    referencesCodeLensProvider = referencesLensProvider;
     context.subscriptions.push(
         vscode.languages.registerCodeLensProvider(docSelector, codeLensProvider),
         vscode.languages.registerCodeLensProvider(docSelector, referencesLensProvider)
@@ -60,6 +64,10 @@ class JavaComplexityCodeLensProvider implements vscode.CodeLensProvider {
                 this._onDidChangeCodeLenses.fire();
             }
         });
+    }
+
+    public refresh() {
+        this._onDidChangeCodeLenses.fire();
     }
 
     async provideCodeLenses(
@@ -225,6 +233,10 @@ class JavaReferencesCodeLensProvider implements vscode.CodeLensProvider {
         });
     }
 
+    public refresh() {
+        this._onDidChangeCodeLenses.fire();
+    }
+
     async provideCodeLenses(
         document: vscode.TextDocument,
         token: vscode.CancellationToken
@@ -265,6 +277,20 @@ class JavaReferencesCodeLensProvider implements vscode.CodeLensProvider {
                         sym.kind === vscode.SymbolKind.Constant
                     ) {
                         lenses.push(new JavaSymbolCodeLens(document.uri, sym.selectionRange, sym.kind));
+                        
+                        // Add "⚡ view bytecode" Lens for Class, Interface, Method, Constructor
+                        if (
+                            sym.kind === vscode.SymbolKind.Class ||
+                            sym.kind === vscode.SymbolKind.Interface ||
+                            sym.kind === vscode.SymbolKind.Method ||
+                            sym.kind === vscode.SymbolKind.Constructor
+                        ) {
+                            lenses.push(new vscode.CodeLens(sym.selectionRange, {
+                                title: '⚡ view bytecode',
+                                command: 'ignis.java.bytecode.view',
+                                arguments: [document.uri, sym.selectionRange.start.line + 1]
+                            }));
+                        }
                     }
                     if (sym.children && sym.children.length > 0) {
                         traverse(sym.children);
@@ -911,6 +937,12 @@ export async function activate(context: vscode.ExtensionContext) {
                     treeDataProvider.clearCache();
                     treeDataProvider.refresh();
                     complexityDataProvider.refresh();
+                    if (complexityCodeLensProvider) {
+                        complexityCodeLensProvider.refresh();
+                    }
+                    if (referencesCodeLensProvider) {
+                        referencesCodeLensProvider.refresh();
+                    }
                 });
             } else {
                 jdtlsReady = true;
@@ -999,6 +1031,102 @@ export async function activate(context: vscode.ExtensionContext) {
             }
         })
     );
+
+    // 5. Register Bytecode Provider & Command
+    const bytecodeProvider = new IgnisJavaBytecodeProvider();
+    context.subscriptions.push(
+        vscode.workspace.registerTextDocumentContentProvider('ignis-bytecode', bytecodeProvider),
+        vscode.commands.registerCommand('ignis.java.bytecode.view', async (uriOrItem?: any, line?: number) => {
+            let uri: vscode.Uri | undefined;
+            if (uriOrItem instanceof vscode.Uri) {
+                uri = uriOrItem;
+            } else if (vscode.window.activeTextEditor) {
+                uri = vscode.window.activeTextEditor.document.uri;
+                if (line === undefined && vscode.window.activeTextEditor.selection) {
+                    line = vscode.window.activeTextEditor.selection.start.line + 1;
+                }
+            }
+
+            if (!uri) {
+                vscode.window.showErrorMessage('No active Java file to view bytecode.');
+                return;
+            }
+
+            const virtualUri = vscode.Uri.from({
+                scheme: 'ignis-bytecode',
+                path: '/bytecode',
+                query: `uri=${encodeURIComponent(uri.toString())}${line !== undefined ? `&line=${line}` : ''}`
+            });
+
+            try {
+                const doc = await vscode.workspace.openTextDocument(virtualUri);
+                await vscode.window.showTextDocument(doc, {
+                    viewColumn: vscode.ViewColumn.Two,
+                    preserveFocus: true
+                });
+                vscode.languages.setTextDocumentLanguage(doc, 'java');
+            } catch (err: any) {
+                vscode.window.showErrorMessage(`Failed to open bytecode view: ${err.message || err}`);
+            }
+        })
+    );
+}
+
+class IgnisJavaBytecodeProvider implements vscode.TextDocumentContentProvider {
+    private _onDidChange = new vscode.EventEmitter<vscode.Uri>();
+    public readonly onDidChange = this._onDidChange.event;
+
+    public update(uri: vscode.Uri) {
+        this._onDidChange.fire(uri);
+    }
+
+    async provideTextDocumentContent(uri: vscode.Uri, token: vscode.CancellationToken): Promise<string> {
+        try {
+            const queryParams = new URLSearchParams(uri.query);
+            const targetUriStr = queryParams.get('uri');
+            const line = queryParams.get('line');
+
+            if (!targetUriStr) {
+                return '// Error: Missing target URI in virtual document query.';
+            }
+
+            const bytecode = await vscode.commands.executeCommand<any>(
+                'java.execute.workspaceCommand',
+                'ignis.java.bytecode.get',
+                targetUriStr,
+                line || null
+            );
+
+            if (bytecode === undefined) {
+                return `// Debug Info:
+// targetUriStr = ${targetUriStr}
+// line = ${line}
+// vscode.commands.executeCommand returned undefined.`;
+            }
+            if (bytecode === null) {
+                return `// Debug Info:
+// targetUriStr = ${targetUriStr}
+// line = ${line}
+// vscode.commands.executeCommand returned null.`;
+            }
+            if (typeof bytecode !== 'string') {
+                return `// Debug Info:
+// targetUriStr = ${targetUriStr}
+// line = ${line}
+// vscode.commands.executeCommand returned type: ${typeof bytecode}, value: ${JSON.stringify(bytecode)}`;
+            }
+            if (bytecode.trim() === '') {
+                return `// Debug Info:
+// targetUriStr = ${targetUriStr}
+// line = ${line}
+// vscode.commands.executeCommand returned an empty string.`;
+            }
+
+            return bytecode;
+        } catch (e: any) {
+            return `// Error retrieving bytecode:\n// ${e.message || e}`;
+        }
+    }
 }
 
 export function deactivate() {}
