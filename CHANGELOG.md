@@ -2,6 +2,20 @@
 
 All notable changes to the **Ignis Arc Java IDE Extension Pack** will be documented in this file.
 
+## [0.1.4] - 2026-05-28
+
+This release introduces bulletproof JRE container library querying and high-fidelity reference filters (removing class declarations, constructors, and imports) to deliver the ultimate clean Code Review experience.
+
+### Added
+*   **High-Fidelity References Filtering**:
+    *   Imports and package statements (e.g., `import com.example.MyClass;`) are now strictly filtered out from the reference count, ensuring unused imports do not inflate usage stats.
+    *   Class declaration headers and constructor declarations are now perfectly identified via the JDT DocumentSymbol compiler AST and filtered out, resolving the self-referencing "1 usage" bug for unused classes and constructors.
+*   **JRE Container-Driven Library Resolution**: Replaced container entry guessing with a 100% robust, two-phase container path mapping. Package fragment roots are now classified by JRE Container inclusion resolved directly by JDT LS, showing Java platform libraries perfectly under the `JDK System Library` tree.
+
+### Fixed
+*   **Filtered Unnamed Packages**: Filtered out unnamed/default package fragments (`""`) from modular libraries and JARs to completely eliminate blank lines (`> [empty label]`) in the explorer tree view.
+*   **Polished Dependency Icons**: Configured `NodeType.LibraryJar` nodes to display VS Code's native `file-zip` icon instead of generic folder icons, providing a sleek, IntelliJ-style dependency tree interface.
+
 ---
 
 ## [0.1.3] - 2026-05-28

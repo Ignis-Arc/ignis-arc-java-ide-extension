@@ -131,6 +131,87 @@ class JavaSymbolCodeLens extends vscode.CodeLens {
         super(range);
     }
 }
+function uriEquals(u1: vscode.Uri, u2: vscode.Uri): boolean {
+    if (u1.scheme !== u2.scheme) return false;
+    if (u1.scheme === 'file') {
+        return u1.fsPath.toLowerCase() === u2.fsPath.toLowerCase();
+    }
+    return u1.toString().toLowerCase() === u2.toString().toLowerCase();
+}
+
+const fileLinesCache = new Map<string, string[]>();
+
+async function getFileLine(uri: vscode.Uri, line: number): Promise<string> {
+    if (uri.scheme === 'file') {
+        const fsPath = uri.fsPath;
+        // Check open documents first
+        const doc = vscode.workspace.textDocuments.find(d => d.uri.scheme === 'file' && d.uri.fsPath.toLowerCase() === fsPath.toLowerCase());
+        if (doc) {
+            if (line < doc.lineCount) {
+                return doc.lineAt(line).text;
+            }
+            return '';
+        }
+        
+        // Otherwise, read from cache or file system
+        try {
+            let lines = fileLinesCache.get(fsPath);
+            if (!lines) {
+                const content = await fs.promises.readFile(fsPath, 'utf8');
+                lines = content.split(/\r?\n/);
+                fileLinesCache.set(fsPath, lines);
+                // Clear cache after 5 seconds to prevent stale data
+                setTimeout(() => fileLinesCache.delete(fsPath), 5000);
+            }
+            if (line < lines.length) {
+                return lines[line];
+            }
+        } catch {
+            // ignore
+        }
+    } else {
+        // Non-file schemes: fallback to openTextDocument
+        try {
+            const doc = await vscode.workspace.openTextDocument(uri);
+            if (line < doc.lineCount) {
+                return doc.lineAt(line).text;
+            }
+        } catch {
+            // ignore
+        }
+    }
+    return '';
+}
+
+async function isImportLine(uri: vscode.Uri, line: number): Promise<boolean> {
+    const text = (await getFileLine(uri, line)).trim();
+    return text.startsWith('import ') || text.startsWith('package ') || text === 'import' || text === 'package';
+}
+
+function isDeclaration(loc: vscode.Location, symbols: vscode.DocumentSymbol[]): boolean {
+    for (const sym of symbols) {
+        if (
+            sym.kind === vscode.SymbolKind.Class ||
+            sym.kind === vscode.SymbolKind.Interface ||
+            sym.kind === vscode.SymbolKind.Enum ||
+            sym.kind === vscode.SymbolKind.Constructor ||
+            sym.kind === vscode.SymbolKind.Method ||
+            sym.kind === vscode.SymbolKind.Field ||
+            sym.kind === vscode.SymbolKind.EnumMember ||
+            sym.kind === vscode.SymbolKind.Constant
+        ) {
+            if (sym.selectionRange.intersection(loc.range) !== undefined) {
+                return true;
+            }
+        }
+        if (sym.children && sym.children.length > 0) {
+            if (isDeclaration(loc, sym.children)) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
 
 class JavaReferencesCodeLensProvider implements vscode.CodeLensProvider {
     private _onDidChangeCodeLenses: vscode.EventEmitter<void> = new vscode.EventEmitter<void>();
@@ -212,6 +293,12 @@ class JavaReferencesCodeLensProvider implements vscode.CodeLensProvider {
         const kind = codeLens.symbolKind;
 
         try {
+            // Retrieve all hierarchical document symbols from the active file to filter out declarations
+            const symbols = await vscode.commands.executeCommand<vscode.DocumentSymbol[]>(
+                'vscode.executeDocumentSymbolProvider',
+                activeUri
+            ).then(r => r || [], () => []);
+
             if (kind === vscode.SymbolKind.Interface) {
                 // Query implementations
                 const impls = await vscode.commands.executeCommand<vscode.Location[]>(
@@ -219,7 +306,20 @@ class JavaReferencesCodeLensProvider implements vscode.CodeLensProvider {
                     activeUri,
                     position
                 );
-                const count = impls ? impls.length : 0;
+                
+                const filteredImpls: vscode.Location[] = [];
+                if (impls) {
+                    for (const loc of impls) {
+                        if (uriEquals(loc.uri, activeUri)) {
+                            if (isDeclaration(loc, symbols)) {
+                                continue;
+                            }
+                        }
+                        filteredImpls.push(loc);
+                    }
+                }
+
+                const count = filteredImpls.length;
                 const title = count > 0 
                     ? `🔗 ${count} implementation${count === 1 ? '' : 's'}`
                     : '🔗 no implementations';
@@ -227,7 +327,7 @@ class JavaReferencesCodeLensProvider implements vscode.CodeLensProvider {
                 codeLens.command = {
                     title: title,
                     command: 'editor.action.showReferences',
-                    arguments: [activeUri, position, impls || []]
+                    arguments: [activeUri, position, filteredImpls]
                 };
             } else if (kind === vscode.SymbolKind.Class) {
                 // Query implementations (subclasses)
@@ -236,14 +336,27 @@ class JavaReferencesCodeLensProvider implements vscode.CodeLensProvider {
                     activeUri,
                     position
                 );
-                const subclassCount = subclasses ? subclasses.length : 0;
+
+                const filteredSubclasses: vscode.Location[] = [];
+                if (subclasses) {
+                    for (const loc of subclasses) {
+                        if (uriEquals(loc.uri, activeUri)) {
+                            if (isDeclaration(loc, symbols)) {
+                                continue;
+                            }
+                        }
+                        filteredSubclasses.push(loc);
+                    }
+                }
+
+                const subclassCount = filteredSubclasses.length;
 
                 if (subclassCount > 0) {
                     const title = `🔗 ${subclassCount} subclass${subclassCount === 1 ? '' : 'es'}`;
                     codeLens.command = {
                         title: title,
                         command: 'editor.action.showReferences',
-                        arguments: [activeUri, position, subclasses || []]
+                        arguments: [activeUri, position, filteredSubclasses]
                     };
                 } else {
                     // Fallback to general references/usages
@@ -252,10 +365,24 @@ class JavaReferencesCodeLensProvider implements vscode.CodeLensProvider {
                         activeUri,
                         position
                     );
-                    // Filter out the definition itself in the same file to show actual usage count
-                    const count = locations
-                        ? locations.filter(loc => !(loc.uri.toString() === activeUri.toString() && loc.range.contains(position))).length
-                        : 0;
+
+                    const filteredLocations: vscode.Location[] = [];
+                    if (locations) {
+                        for (const loc of locations) {
+                            if (uriEquals(loc.uri, activeUri)) {
+                                if (isDeclaration(loc, symbols)) {
+                                    continue;
+                                }
+                            }
+                            const isImport = await isImportLine(loc.uri, loc.range.start.line);
+                            if (isImport) {
+                                continue;
+                            }
+                            filteredLocations.push(loc);
+                        }
+                    }
+
+                    const count = filteredLocations.length;
                     const title = count > 0 
                         ? `🔗 ${count} usage${count === 1 ? '' : 's'}`
                         : '🔗 no usages';
@@ -263,7 +390,7 @@ class JavaReferencesCodeLensProvider implements vscode.CodeLensProvider {
                     codeLens.command = {
                         title: title,
                         command: 'editor.action.showReferences',
-                        arguments: [activeUri, position, locations || []]
+                        arguments: [activeUri, position, filteredLocations]
                     };
                 }
             } else {
@@ -273,10 +400,24 @@ class JavaReferencesCodeLensProvider implements vscode.CodeLensProvider {
                     activeUri,
                     position
                 );
-                // Filter out the definition itself in the same file to show actual usage count
-                const count = locations
-                    ? locations.filter(loc => !(loc.uri.toString() === activeUri.toString() && loc.range.contains(position))).length
-                    : 0;
+
+                const filteredLocations: vscode.Location[] = [];
+                if (locations) {
+                    for (const loc of locations) {
+                        if (uriEquals(loc.uri, activeUri)) {
+                            if (isDeclaration(loc, symbols)) {
+                                continue;
+                            }
+                        }
+                        const isImport = await isImportLine(loc.uri, loc.range.start.line);
+                        if (isImport) {
+                            continue;
+                        }
+                        filteredLocations.push(loc);
+                    }
+                }
+
+                const count = filteredLocations.length;
                 const title = count > 0 
                     ? `🔗 ${count} usage${count === 1 ? '' : 's'}`
                     : '🔗 no usages';
@@ -284,7 +425,7 @@ class JavaReferencesCodeLensProvider implements vscode.CodeLensProvider {
                 codeLens.command = {
                     title: title,
                     command: 'editor.action.showReferences',
-                    arguments: [activeUri, position, locations || []]
+                    arguments: [activeUri, position, filteredLocations]
                 };
             }
         } catch (error) {
@@ -348,7 +489,7 @@ class IgnisJavaTreeItem extends vscode.TreeItem {
                 this.iconPath = new vscode.ThemeIcon('library');
                 break;
             case NodeType.LibraryJar:
-                this.resourceUri = vscode.Uri.file(pathValue);
+                this.iconPath = new vscode.ThemeIcon('file-zip');
                 break;
             case NodeType.Package:
                 this.iconPath = vscode.ThemeIcon.Folder;

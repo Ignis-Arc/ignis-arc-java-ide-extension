@@ -168,31 +168,36 @@ public class IgnisSuiteCommandHandler implements IDelegateCommandHandler {
         List<Map<String, Object>> systemLibs = new ArrayList<>();
         List<Map<String, Object>> userLibs = new ArrayList<>();
         String jreName = "JDK System Library";
+        java.util.Set<String> jrePaths = new java.util.HashSet<>();
 
         try {
             IJavaModel javaModel = JavaCore.create(ResourcesPlugin.getWorkspace().getRoot());
             IJavaProject[] javaProjects = javaModel.getJavaProjects();
 
             for (IJavaProject javaProject : javaProjects) {
-                // Try to find JRE description from JDT container
-                if ("JDK System Library".equals(jreName)) {
-                    try {
-                        for (IClasspathEntry entry : javaProject.getRawClasspath()) {
-                            if (entry.getEntryKind() == IClasspathEntry.CPE_CONTAINER) {
-                                if (entry.getPath().toString().contains("org.eclipse.jdt.launching.JRE_CONTAINER")) {
-                                    IClasspathContainer container = JavaCore.getClasspathContainer(entry.getPath(), javaProject);
-                                    if (container != null) {
+                try {
+                    for (IClasspathEntry entry : javaProject.getRawClasspath()) {
+                        if (entry.getEntryKind() == IClasspathEntry.CPE_CONTAINER) {
+                            if (entry.getPath().toString().contains("org.eclipse.jdt.launching.JRE_CONTAINER")) {
+                                IClasspathContainer container = JavaCore.getClasspathContainer(entry.getPath(), javaProject);
+                                if (container != null) {
+                                    if ("JDK System Library".equals(jreName)) {
                                         jreName = container.getDescription();
-                                        break;
+                                    }
+                                    for (IClasspathEntry jreEntry : container.getClasspathEntries()) {
+                                        jrePaths.add(jreEntry.getPath().toOSString());
                                     }
                                 }
                             }
                         }
-                    } catch (Exception e) {
-                        // ignore
                     }
+                } catch (Exception e) {
+                    // ignore
                 }
+            }
 
+            // Phase 2: Traverse and classify package fragment roots
+            for (IJavaProject javaProject : javaProjects) {
                 try {
                     IPackageFragmentRoot[] roots = javaProject.getPackageFragmentRoots();
                     for (IPackageFragmentRoot root : roots) {
@@ -203,21 +208,34 @@ public class IgnisSuiteCommandHandler implements IDelegateCommandHandler {
                             libMap.put("path", rootPath);
                             libMap.put("id", root.getHandleIdentifier());
 
-                            // Classify: JDK/JRE system library vs user referenced library
-                            boolean isSystem = false;
-                            IClasspathEntry rawEntry = root.getRawClasspathEntry();
-                            if (rawEntry != null && rawEntry.getEntryKind() == IClasspathEntry.CPE_CONTAINER) {
-                                if (rawEntry.getPath().toString().contains("org.eclipse.jdt.launching.JRE_CONTAINER")) {
+                            // Classify JRE system libraries exactly by resolved container path containment
+                            boolean isSystem = jrePaths.contains(rootPath);
+                            if (!isSystem) {
+                                try {
+                                    IClasspathEntry rawEntry = root.getRawClasspathEntry();
+                                    if (rawEntry != null) {
+                                        String entryPath = rawEntry.getPath().toString();
+                                        if (entryPath.contains("org.eclipse.jdt.launching.JRE_CONTAINER") || entryPath.contains("JRE_CONTAINER")) {
+                                            isSystem = true;
+                                        }
+                                    }
+                                } catch (Exception e) {
+                                    // ignore
+                                }
+                            }
+                            if (!isSystem) {
+                                String pathStr = root.getPath().toString();
+                                if (pathStr.startsWith("jrt:") || pathStr.contains("rt.jar") || pathStr.contains("jrt-fs.jar")) {
                                     isSystem = true;
                                 }
                             }
 
                             if (isSystem) {
-                                if (!containsPath(systemLibs, rootPath)) {
+                                if (!containsId(systemLibs, root.getHandleIdentifier())) {
                                     systemLibs.add(libMap);
                                 }
                             } else {
-                                if (!containsPath(userLibs, rootPath)) {
+                                if (!containsId(userLibs, root.getHandleIdentifier())) {
                                     userLibs.add(libMap);
                                 }
                             }
@@ -237,9 +255,9 @@ public class IgnisSuiteCommandHandler implements IDelegateCommandHandler {
         return result;
     }
 
-    private boolean containsPath(List<Map<String, Object>> list, String path) {
+    private boolean containsId(List<Map<String, Object>> list, String id) {
         for (Map<String, Object> map : list) {
-            if (path.equals(map.get("path"))) {
+            if (id.equals(map.get("id"))) {
                 return true;
             }
         }
@@ -278,10 +296,13 @@ public class IgnisSuiteCommandHandler implements IDelegateCommandHandler {
             if (child instanceof IPackageFragment) {
                 IPackageFragment pkg = (IPackageFragment) child;
                 if (pkg.hasChildren()) {
-                    Map<String, Object> pkgMap = new HashMap<>();
-                    pkgMap.put("name", pkg.getElementName());
-                    pkgMap.put("id", pkg.getHandleIdentifier());
-                    packagesList.add(pkgMap);
+                    String pkgName = pkg.getElementName();
+                    if (pkgName != null && !pkgName.isEmpty()) {
+                        Map<String, Object> pkgMap = new HashMap<>();
+                        pkgMap.put("name", pkgName);
+                        pkgMap.put("id", pkg.getHandleIdentifier());
+                        packagesList.add(pkgMap);
+                    }
                 }
             }
         }
