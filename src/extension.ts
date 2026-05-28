@@ -137,7 +137,8 @@ class JavaSymbolCodeLens extends vscode.CodeLens {
     constructor(
         public readonly uri: vscode.Uri,
         range: vscode.Range,
-        public readonly symbolKind: vscode.SymbolKind
+        public readonly symbolKind: vscode.SymbolKind,
+        public readonly parentKind?: vscode.SymbolKind
     ) {
         super(range);
     }
@@ -211,7 +212,12 @@ function isDeclaration(loc: vscode.Location, symbols: vscode.DocumentSymbol[]): 
             sym.kind === vscode.SymbolKind.EnumMember ||
             sym.kind === vscode.SymbolKind.Constant
         ) {
-            if (sym.selectionRange.intersection(loc.range) !== undefined) {
+            if (
+                sym.selectionRange.contains(loc.range.start) ||
+                sym.selectionRange.contains(loc.range.end) ||
+                loc.range.contains(sym.selectionRange.start) ||
+                sym.selectionRange.intersection(loc.range) !== undefined
+            ) {
                 return true;
             }
         }
@@ -220,6 +226,33 @@ function isDeclaration(loc: vscode.Location, symbols: vscode.DocumentSymbol[]): 
                 return true;
             }
         }
+    }
+    return false;
+}
+
+function isLombokAnnotationLine(text: string): boolean {
+    const trimmed = text.trim();
+    const lombokAnns = [
+        '@Data', '@Builder', '@NoArgsConstructor', '@AllArgsConstructor',
+        '@RequiredArgsConstructor', '@Getter', '@Setter', '@Value',
+        '@ToString', '@EqualsAndHashCode', '@Slf4j', '@Log'
+    ];
+    return lombokAnns.some(ann => trimmed.includes(ann));
+}
+
+function isSyntheticSymbol(sym: vscode.DocumentSymbol, document: vscode.TextDocument): boolean {
+    const lineText = document.lineAt(sym.selectionRange.start.line).text;
+    
+    // If the line text contains any Lombok annotation, it is a generator line
+    if (isLombokAnnotationLine(lineText)) {
+        return true;
+    }
+
+    // Check if the symbol's name is actually present on its declaration line
+    const name = sym.name;
+    const cleanName = name.split('(')[0].trim();
+    if (cleanName && !lineText.includes(cleanName)) {
+        return true;
     }
     return false;
 }
@@ -267,8 +300,14 @@ class JavaReferencesCodeLensProvider implements vscode.CodeLensProvider {
 
             const lenses: vscode.CodeLens[] = [];
 
-            const traverse = (syms: vscode.DocumentSymbol[]) => {
+            const traverse = (syms: vscode.DocumentSymbol[], parentKind?: vscode.SymbolKind) => {
                 for (const sym of syms) {
+                    if (isSyntheticSymbol(sym, document)) {
+                        if (sym.children && sym.children.length > 0) {
+                            traverse(sym.children, sym.kind);
+                        }
+                        continue;
+                    }
                     if (
                         sym.kind === vscode.SymbolKind.Class ||
                         sym.kind === vscode.SymbolKind.Interface ||
@@ -279,7 +318,7 @@ class JavaReferencesCodeLensProvider implements vscode.CodeLensProvider {
                         sym.kind === vscode.SymbolKind.Field ||
                         sym.kind === vscode.SymbolKind.Constant
                     ) {
-                        lenses.push(new JavaSymbolCodeLens(document.uri, sym.selectionRange, sym.kind));
+                        lenses.push(new JavaSymbolCodeLens(document.uri, sym.selectionRange, sym.kind, parentKind));
                         
                         // Add "⚡ view bytecode" Lens for Class, Interface, Method, Constructor
                         if (
@@ -296,7 +335,7 @@ class JavaReferencesCodeLensProvider implements vscode.CodeLensProvider {
                         }
                     }
                     if (sym.children && sym.children.length > 0) {
-                        traverse(sym.children);
+                        traverse(sym.children, sym.kind);
                     }
                 }
             };
@@ -340,8 +379,12 @@ class JavaReferencesCodeLensProvider implements vscode.CodeLensProvider {
                 if (impls) {
                     for (const loc of impls) {
                         if (uriEquals(loc.uri, activeUri)) {
-                            if (isDeclaration(loc, symbols)) {
-                                continue;
+                            const lineText = (await getFileLine(loc.uri, loc.range.start.line)).trim();
+                            if (
+                                lineText.includes('interface ') || 
+                                isDeclaration(loc, symbols)
+                            ) {
+                                continue; // Filter out interface declaration itself
                             }
                         }
                         filteredImpls.push(loc);
@@ -370,8 +413,15 @@ class JavaReferencesCodeLensProvider implements vscode.CodeLensProvider {
                 if (subclasses) {
                     for (const loc of subclasses) {
                         if (uriEquals(loc.uri, activeUri)) {
-                            if (isDeclaration(loc, symbols)) {
-                                continue;
+                            const lineText = (await getFileLine(loc.uri, loc.range.start.line)).trim();
+                            if (
+                                lineText.includes('@Builder') || 
+                                lineText.includes('@Data') || 
+                                lineText.includes('@Value') ||
+                                lineText.includes('class ') || 
+                                isDeclaration(loc, symbols)
+                            ) {
+                                continue; // Filter out Lombok builder and base class declaration itself
                             }
                         }
                         filteredSubclasses.push(loc);
@@ -430,6 +480,16 @@ class JavaReferencesCodeLensProvider implements vscode.CodeLensProvider {
                     position
                 );
 
+                // For methods, query implementation/overrides to filter them out of references
+                let impls: vscode.Location[] = [];
+                if (kind === vscode.SymbolKind.Method) {
+                    impls = await vscode.commands.executeCommand<vscode.Location[]>(
+                        'vscode.executeImplementationProvider',
+                        activeUri,
+                        position
+                    ).then(r => r || [], () => []);
+                }
+
                 const filteredLocations: vscode.Location[] = [];
                 if (locations) {
                     for (const loc of locations) {
@@ -442,19 +502,57 @@ class JavaReferencesCodeLensProvider implements vscode.CodeLensProvider {
                         if (isImport) {
                             continue;
                         }
+                        
+                        // Filter out overrides/implementations
+                        if (kind === vscode.SymbolKind.Method && impls.length > 0) {
+                            let isImpl = false;
+                            for (const impl of impls) {
+                                if (
+                                    uriEquals(impl.uri, loc.uri) && 
+                                    (impl.range.contains(loc.range.start) || 
+                                     impl.range.contains(loc.range.end) || 
+                                     loc.range.contains(impl.range.start) ||
+                                     impl.range.intersection(loc.range) !== undefined)
+                                ) {
+                                    isImpl = true;
+                                    break;
+                                }
+                            }
+                            if (isImpl) {
+                                continue; // Skip implementation overrides
+                            }
+                        }
+                        
                         filteredLocations.push(loc);
                     }
                 }
 
-                const count = filteredLocations.length;
-                const title = count > 0 
-                    ? `🔗 ${count} usage${count === 1 ? '' : 's'}`
-                    : '🔗 no usages';
+                let title = '';
+                if (kind === vscode.SymbolKind.Method && impls.length > 0) {
+                    const implsCount = impls.length;
+                    const usagesCount = filteredLocations.length;
+                    
+                    const isInterface = codeLens.parentKind === vscode.SymbolKind.Interface;
+                    const label = isInterface ? 'implementation' : 'override';
+                    
+                    const implText = `${implsCount} ${label}${implsCount === 1 ? '' : 's'}`;
+                    const usageText = usagesCount > 0 ? `${usagesCount} usage${usagesCount === 1 ? '' : 's'}` : 'no usages';
+                    title = `🔗 ${implText} · 🔗 ${usageText}`;
+                } else {
+                    const usagesCount = filteredLocations.length;
+                    title = usagesCount > 0 
+                        ? `🔗 ${usagesCount} usage${usagesCount === 1 ? '' : 's'}`
+                        : '🔗 no usages';
+                }
+
+                const targetLocations = (kind === vscode.SymbolKind.Method && impls.length > 0)
+                    ? [...impls, ...filteredLocations]
+                    : filteredLocations;
 
                 codeLens.command = {
                     title: title,
                     command: 'editor.action.showReferences',
-                    arguments: [activeUri, position, filteredLocations]
+                    arguments: [activeUri, position, targetLocations]
                 };
             }
         } catch (error) {
