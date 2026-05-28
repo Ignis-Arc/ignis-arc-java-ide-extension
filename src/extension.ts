@@ -123,7 +123,11 @@ class JavaComplexityCodeLensProvider implements vscode.CodeLensProvider {
 }
 
 class JavaSymbolCodeLens extends vscode.CodeLens {
-    constructor(range: vscode.Range, public readonly symbolKind: vscode.SymbolKind) {
+    constructor(
+        public readonly uri: vscode.Uri,
+        range: vscode.Range,
+        public readonly symbolKind: vscode.SymbolKind
+    ) {
         super(range);
     }
 }
@@ -179,7 +183,7 @@ class JavaReferencesCodeLensProvider implements vscode.CodeLensProvider {
                         sym.kind === vscode.SymbolKind.Field ||
                         sym.kind === vscode.SymbolKind.Constant
                     ) {
-                        lenses.push(new JavaSymbolCodeLens(sym.selectionRange, sym.kind));
+                        lenses.push(new JavaSymbolCodeLens(document.uri, sym.selectionRange, sym.kind));
                     }
                     if (sym.children && sym.children.length > 0) {
                         traverse(sym.children);
@@ -203,13 +207,7 @@ class JavaReferencesCodeLensProvider implements vscode.CodeLensProvider {
             return codeLens;
         }
 
-        const activeEditor = vscode.window.activeTextEditor;
-        if (!activeEditor) {
-            codeLens.command = { title: '🔗 0 usages', command: '' };
-            return codeLens;
-        }
-
-        const activeUri = activeEditor.document.uri;
+        const activeUri = codeLens.uri;
         const position = codeLens.range.start;
         const kind = codeLens.symbolKind;
 
@@ -222,7 +220,9 @@ class JavaReferencesCodeLensProvider implements vscode.CodeLensProvider {
                     position
                 );
                 const count = impls ? impls.length : 0;
-                const title = `🔗 ${count} implementation${count === 1 ? '' : 's'}`;
+                const title = count > 0 
+                    ? `🔗 ${count} implementation${count === 1 ? '' : 's'}`
+                    : '🔗 no implementations';
 
                 codeLens.command = {
                     title: title,
@@ -252,8 +252,14 @@ class JavaReferencesCodeLensProvider implements vscode.CodeLensProvider {
                         activeUri,
                         position
                     );
-                    const count = locations ? locations.length : 0;
-                    const title = `🔗 ${count} usage${count === 1 ? '' : 's'}`;
+                    // Filter out the definition itself in the same file to show actual usage count
+                    const count = locations
+                        ? locations.filter(loc => !(loc.uri.toString() === activeUri.toString() && loc.range.contains(position))).length
+                        : 0;
+                    const title = count > 0 
+                        ? `🔗 ${count} usage${count === 1 ? '' : 's'}`
+                        : '🔗 no usages';
+
                     codeLens.command = {
                         title: title,
                         command: 'editor.action.showReferences',
@@ -267,8 +273,14 @@ class JavaReferencesCodeLensProvider implements vscode.CodeLensProvider {
                     activeUri,
                     position
                 );
-                const count = locations ? locations.length : 0;
-                const title = `🔗 ${count} usage${count === 1 ? '' : 's'}`;
+                // Filter out the definition itself in the same file to show actual usage count
+                const count = locations
+                    ? locations.filter(loc => !(loc.uri.toString() === activeUri.toString() && loc.range.contains(position))).length
+                    : 0;
+                const title = count > 0 
+                    ? `🔗 ${count} usage${count === 1 ? '' : 's'}`
+                    : '🔗 no usages';
+
                 codeLens.command = {
                     title: title,
                     command: 'editor.action.showReferences',
@@ -277,7 +289,7 @@ class JavaReferencesCodeLensProvider implements vscode.CodeLensProvider {
             }
         } catch (error) {
             codeLens.command = {
-                title: '🔗 0 usages',
+                title: '🔗 no usages',
                 command: ''
             };
         }
@@ -342,8 +354,8 @@ class IgnisJavaTreeItem extends vscode.TreeItem {
                 this.iconPath = vscode.ThemeIcon.Folder;
                 break;
             case NodeType.Class:
-                // Set resourceUri to a Java class filename to fetch active theme icons
-                this.resourceUri = vscode.Uri.file(label);
+                // Set resourceUri with a custom scheme to fetch active theme icons without triggering filesystem stat queries
+                this.resourceUri = vscode.Uri.from({ scheme: 'jdt-class', path: '/' + label });
                 this.command = {
                     command: 'ignis.java.navigator.openFile',
                     title: 'Open Class File',
@@ -715,8 +727,13 @@ class IgnisJavaComplexityTreeDataProvider implements vscode.TreeDataProvider<Com
 export async function activate(context: vscode.ExtensionContext) {
     console.log('Ignis Arc Java IDE Extension Pack is active!');
 
-    // Set custom context to show the sidebar icon only in Java projects
-    vscode.commands.executeCommand('setContext', 'ignisJava:isJavaProject', true);
+    // Detect if this is a Java workspace to set custom context
+    const hasJavaProject =
+        (await vscode.workspace.findFiles('**/pom.xml', '**/node_modules/**', 1)).length > 0 ||
+        (await vscode.workspace.findFiles('**/build.gradle', '**/node_modules/**', 1)).length > 0 ||
+        (await vscode.workspace.findFiles('**/*.java', '**/node_modules/**', 1)).length > 0;
+
+    vscode.commands.executeCommand('setContext', 'ignisJava:isJavaProject', hasJavaProject);
 
     // 1. Register TreeView & Code Lens Providers immediately
     const treeDataProvider = new IgnisJavaProjectTreeDataProvider();
@@ -753,28 +770,6 @@ export async function activate(context: vscode.ExtensionContext) {
                     treeDataProvider.clearCache();
                     treeDataProvider.refresh();
                     complexityDataProvider.refresh();
-
-                    // Automatically schedule retries in case projects are still importing in the background
-                    setTimeout(() => {
-                        console.log('Auto-refreshing Ignis Arc Explorer & Complexity sideview (2s delay)...');
-                        treeDataProvider.clearCache();
-                        treeDataProvider.refresh();
-                        complexityDataProvider.refresh();
-                    }, 2000);
-
-                    setTimeout(() => {
-                        console.log('Auto-refreshing Ignis Arc Explorer & Complexity sideview (5s delay)...');
-                        treeDataProvider.clearCache();
-                        treeDataProvider.refresh();
-                        complexityDataProvider.refresh();
-                    }, 5000);
-
-                    setTimeout(() => {
-                        console.log('Auto-refreshing Ignis Arc Explorer & Complexity sideview (10s delay)...');
-                        treeDataProvider.clearCache();
-                        treeDataProvider.refresh();
-                        complexityDataProvider.refresh();
-                    }, 10000);
                 });
             } else {
                 jdtlsReady = true;
@@ -849,11 +844,17 @@ export async function activate(context: vscode.ExtensionContext) {
         })
     );
 
-    // 4. Hook up document save events to automatically refresh the complexity sideview on local saves
+    // 4. Hook up document save events to automatically refresh the complexity sideview on local saves with debounce
+    let saveTimeout: NodeJS.Timeout | undefined;
     context.subscriptions.push(
         vscode.workspace.onDidSaveTextDocument((document) => {
             if (document.languageId === 'java' || document.fileName.endsWith('.java')) {
-                complexityDataProvider.refresh();
+                if (saveTimeout) {
+                    clearTimeout(saveTimeout);
+                }
+                saveTimeout = setTimeout(() => {
+                    complexityDataProvider.refresh();
+                }, 500);
             }
         })
     );

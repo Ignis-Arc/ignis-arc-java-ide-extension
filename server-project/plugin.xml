@@ -4,6 +4,7 @@
    <extension point="org.eclipse.jdt.ls.core.delegateCommandHandler">
       <delegateCommandHandler class="com.ignis.arc.java.ide.IgnisSuiteCommandHandler">
          <command id="ignis.java.complexity.calculate" />
+         <command id="ignis.java.complexity.scanWorkspace" />
          <command id="ignis.java.project.getStructure" />
          <command id="ignis.java.project.getLibraries" />
          <command id="ignis.java.library.getPackages" />

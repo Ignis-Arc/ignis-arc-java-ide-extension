@@ -205,23 +205,11 @@ public class IgnisSuiteCommandHandler implements IDelegateCommandHandler {
 
                             // Classify: JDK/JRE system library vs user referenced library
                             boolean isSystem = false;
-                            String pathStr = rootPath.toLowerCase();
-                            
-                            // If it's a Maven or Gradle cache entry, it is NEVER a JDK system library!
-                            if (pathStr.contains(".m2/repository") || 
-                                pathStr.contains(".gradle/caches") || 
-                                pathStr.contains("/.m2/") || 
-                                pathStr.contains("/.gradle/")) {
-                                isSystem = false;
-                            } else if (pathStr.contains("jre") || 
-                                       pathStr.contains("jdk") || 
-                                       pathStr.contains("java-") || 
-                                       pathStr.contains("rt.jar") || 
-                                       pathStr.contains("jrt-fs") ||
-                                       pathStr.contains("/jvm/") ||
-                                       pathStr.contains("javavirtualmachines") ||
-                                       pathStr.contains("\\program files\\java\\")) {
-                                isSystem = true;
+                            IClasspathEntry rawEntry = root.getRawClasspathEntry();
+                            if (rawEntry != null && rawEntry.getEntryKind() == IClasspathEntry.CPE_CONTAINER) {
+                                if (rawEntry.getPath().toString().contains("org.eclipse.jdt.launching.JRE_CONTAINER")) {
+                                    isSystem = true;
+                                }
                             }
 
                             if (isSystem) {
