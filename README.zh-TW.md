@@ -4,12 +4,12 @@
 [![License](https://img.shields.io/badge/License-MIT-blue.svg?style=for-the-badge)](LICENSE)
 [![Platform](https://img.shields.io/badge/Platform-VS_Code-007ACC?style=for-the-badge&logo=visual-studio-code)](https://code.visualstudio.com/)
 
-這是一款為 VS Code 量身打造的 Java 開發強化套件。結合了重量級 IDE (IntelliJ IDEA / Eclipse) 級別的**專案樹導航、外部依賴庫瀏覽、源碼一鍵反編譯**能力，以及**即時方法複雜度 Code Lenses 分析**，為您提供無比流暢、輕量且精緻的 Java 開發體驗。
+這是一款為 VS Code 量身打造的 Java 開發強化套件。結合了重量級 IDE (IntelliJ IDEA / Eclipse) 級別的**專案樹導航、外部依賴庫瀏覽、源碼一鍵反編譯、程式碼複雜度巡檢與引用計數追蹤**能力，為您提供無比流暢、輕量且精緻的 Java 開發體驗。
 
 ---
 
 > [!IMPORTANT]  
-> **擴充套件依賴說明：**  
+> **擴充套件依賴與協同處理說明：**  
 > 本套件做為高性能開發輔助包，嚴格依賴於 **[Language Support for Java(TM) by Red Hat](https://marketplace.visualstudio.com/items?itemName=redhat.java)** (`redhat.java`)。  
 > 為了避免像傳統工具一樣啟動多個沉重的 Java 進程，本套件編譯為 OSGi 外掛包，**直接載入並運行於 Red Hat 共享的 JDT LS JVM 進程中**，確保零額外記憶體與 CPU 開銷。
 
@@ -20,23 +20,33 @@
 ### 1. Ignis Arc Java Explorer (原生感檔案與依賴導航樹)
 捨棄雜亂的 Package 扁平清單，Explorer 呈現極其整潔的原生目錄結構，並完美整合動態 Java 依賴庫：
 *   **原生目錄結構**：完全模擬 VS Code 原生檔案總管，檔案與資料夾按字母順序排列（資料夾優先）。
-*   **動態主題圖示**：透過將檔案與虛擬節點映射至 `resourceUri`，**100% 繼承您當前啟動的 VS Code 檔案圖示主題**（如 *Material Icon Theme* 或 *vscode-icons*）！不論是資料夾、Maven `pom.xml`、Gradle `build.gradle`、`.java` 類別還是 `.jar` 庫，皆能展現完美配色！
+*   **動態主題圖示**：透過將檔案與虛擬節點映射至自定義的 `jdt-class` 協定 URI，**100% 繼承您當前啟動的 VS Code 檔案圖示主題**（如 *Material Icon Theme* 或 *vscode-icons*）！且完全不會觸發本地磁碟的 filesystem `stat` 查詢開銷！不論是資料夾、Maven `pom.xml`、Gradle `build.gradle`、`.java` 類別還是 `.jar` 庫，皆能展現完美配色！
 *   **JDK 與外部依賴庫容器**：
-    *   **JDK System Library**：動態展示當前專案對接的 JRE 容器名稱（例如 `JDK System Library [JavaSE-21]`）。
+    *   **JDK System Library**：直接透過 JDT 內置的 Raw Classpath Container 進行 API 判定，動態且 100% 精準地展示當前專案對接的 JRE 容器名稱（例如 `JDK System Library [java-21-openjdk-amd64]`），完美支持 Linux、macOS、Windows 和 WSL！
     *   **Referenced Libraries**：列出專案所有的 Maven、Gradle 以及自訂引入的 `.jar` 第三方依賴庫。
 *   **依賴庫懶載入瀏覽**：展開 JAR 檔案時才向 JDT LS 請求載入 package，展開 package 時才載入 compiled `.class` 檔案。即使在超大型專案中依然順滑無比。
 *   **一鍵源碼反編譯**：只需雙擊依賴庫中的任何 `.class` 檔案，即可透過 JDT LS 的 `jdt://` 協定**自動反編譯並在編輯器中以全語法高亮展示原始碼**！
-*   **智慧活動列隱藏**：焱虹的火焰活動列圖標會在外掛識別到 Java 專案時（透過 `workspaceContains:` 原生偵測）自動出現在左側，而在非 Java 專案中則會完全自動隱藏，保持開發介面純淨。
+*   **智慧活動列隱藏**：焱虹的外掛會動態掃描工作區，僅在偵測到 `pom.xml`、`build.gradle` 或 `*.java` 檔案時，才啟用焱虹火焰活動列圖標；在非 Java 專案中則會自動完全隱藏，保持您的 VS Code 介面乾淨純粹。
 
----
+### 2. Ignis Arc Complexity Analyzer 側邊欄 (全新推出 🚀)
+一個專為程式碼審查（Code Review）設計的側邊欄面板。它會在背景快速掃描您工作區中的所有 Java 原始碼，並按圈複雜度降序排列，幫助您立即鎖定維護死角：
+*   **McCabe 圈複雜度標準**：支持完整的分支與決策路徑計量，包括迴圈 (`for`, `while`, `do-while`, enhanced `for`)、條件判斷 (`if`)、異常處理 (`catch`)、選擇分支 (`case`)、短路邏輯運算子 (`&&`, `||`)，以及**三元運算子 (`? :`)**。
+*   **簽名行精準靠齊與 Lombok 過濾**：
+    *   圈複雜度 Code Lens 標記會精準靠齊在方法名稱那一行（`getName().getStartPosition()`），再多 Annotation 也不會產生錯位。
+    *   透過物理 AST 特徵分析，自動過濾掉 Lombok（如 `@EqualsAndHashCode`）或編譯器自動生成的 synthesized 方法，讓您的檢視面板 100% 專注於開發者手寫的代碼！
+*   **一鍵程式碼跳轉**：點擊側邊欄樹狀清單中的任何方法，即可自動開啟對應 `.java` 檔案、選取該方法簽名行，並將編輯器視窗居中對齊。
+*   **存檔自動防抖掃描 (Debounce)**：在您存檔 `.java` 文件時自動觸發側邊欄整理，內置 500ms 防抖動機制，避免頻繁存檔造成系統 CPU 與磁碟 IO 過載。
 
-### 2. Ignis Arc Complexity Lens (方法級別圈複雜度計量)
-在每個 Java 方法定義上方動態渲染圈複雜度計量，幫助您隨時掌握程式碼的健康度與可維護性：
-*   **即時燈號狀態**：
-    *   `🟢 Low` (複雜度 < 5)：結構簡單，易於測試與維護。
-    *   `🟡 Moderate` (複雜度 5 - 9)：結構中等，隨時注意其是否過度膨脹。
-    *   `🔴 High` (複雜度 >= 10)：圈複雜度過高，強烈建議進行程式碼重構（Refactoring）。
-*   **互動式複雜度分析對話框**：點擊複雜度 Lenses，即可彈出精美對話視窗，向您說明具體的圈複雜度分數、評級，並提供量身打造、具體可執行的重構建議。
+### 3. 物件導向專屬引用次數與實現 Lenses (全新推出 🔗)
+高度優化且線程/分頁安全的 Code Lens 提供者。它會在 Java 的各個主要符號上方，動態呈現最符合其物件導向角色的引用資訊：
+*   **物件導向專屬角色**：
+    *   **對於 介面 (Interface)**：自動顯示 **`🔗 X implementations`**（例如 `🔗 3 implementations`）。點擊即可直接打開 VS Code 原生的 Peek View，列出所有具體的實作類別！
+    *   **對於 類別 (Class)**：若有子類別繼承它，顯示為 **`🔗 X subclasses`**；若是終端具體類別，則自動無縫切換為顯示 **`🔗 X usages`**。
+    *   **對於 Enum、方法、成員變數、常數及 Enum 常數成員**：顯示精準的引用次數 **`🔗 X usages`**。
+*   **自動篩選定義本身**：引用計數會自動過濾掉該符號本身的宣告位置。如果某個變數或方法從未被引用過，會極其優雅地顯示為 **`🔗 no usages`** 或 **`🔗 no implementations`**！
+*   **雙階段惰性解析 (Performance-First ⚡)**：
+    *   *provideCodeLenses*：快速在 symbol 位置標記骨架，完全不發送 LSP 查詢，開啟檔案零延遲。
+    *   *resolveCodeLens*：**僅在 Code Lens 真正滾動進入您的畫面中時**，才調用 LSP 查詢引用數。即使在數萬行的企業級巨型專案中依然順流無比！
 
 ---
 
@@ -49,6 +59,8 @@
 | `ignis.java.complexity.enabled` | `boolean` | `true` | 是否在 Java 方法上方顯示圈複雜度 Code Lenses。 |
 | `ignis.java.complexity.mediumThreshold` | `integer` | `5` | 判定為中等複雜度 (`🟡 Moderate`) 的起步分數。 |
 | `ignis.java.complexity.highThreshold` | `integer` | `10` | 警告並判定為高複雜度 (`🔴 High`) 的門檻分數。 |
+| `ignis.java.complexity.criticalThreshold` | `integer` | `20` | 在「複雜度分析器」側邊欄中判定為嚴重 (`🔴 Critical`) 的門檻分數。 |
+| `ignis.java.references.enabled` | `boolean` | `true` | 是否啟用類別、方法和成員變數上方的動態引用次數、實現與子類別 Code Lenses。 |
 
 ---
 
@@ -68,7 +80,7 @@
 專案配置了完全自給自足的編譯工具鏈，免除本地開發機的 JDK 設定限制：
 
 ### 前置準備
-*   `Bun` 或 `Node.js` (用於編譯前端 TS 與封裝 VSIX)
+*   `Bun` or `Node.js` (用於編譯前端 TS 與封裝 VSIX)
 *   標準 Java JRE (由系統提供)
 
 ### 編譯與打包指令
@@ -80,7 +92,7 @@
     ```
 2.  **在 VS Code 中安裝 / 更新**：
     ```bash
-    code --install-extension ignis-arc-java-ide-extension-0.1.0.vsix
+    code --install-extension ignis-arc-java-ide-extension-0.1.3.vsix
     ```
 3.  **清除快取**：
     每次更新後端 JAR 檔案後，強烈建議在 VS Code 中開啟命令面板 (`Ctrl+Shift+P`) 執行 **`Java: Clean Java Language Server Workspace`**，以強制 Equinox 載入全新的外掛指令。
