@@ -122,6 +122,12 @@ class JavaComplexityCodeLensProvider implements vscode.CodeLensProvider {
     }
 }
 
+class JavaSymbolCodeLens extends vscode.CodeLens {
+    constructor(range: vscode.Range, public readonly symbolKind: vscode.SymbolKind) {
+        super(range);
+    }
+}
+
 class JavaReferencesCodeLensProvider implements vscode.CodeLensProvider {
     private _onDidChangeCodeLenses: vscode.EventEmitter<void> = new vscode.EventEmitter<void>();
     public readonly onDidChangeCodeLenses: vscode.Event<void> = this._onDidChangeCodeLenses.event;
@@ -167,12 +173,13 @@ class JavaReferencesCodeLensProvider implements vscode.CodeLensProvider {
                         sym.kind === vscode.SymbolKind.Class ||
                         sym.kind === vscode.SymbolKind.Interface ||
                         sym.kind === vscode.SymbolKind.Enum ||
+                        sym.kind === vscode.SymbolKind.EnumMember ||
                         sym.kind === vscode.SymbolKind.Method ||
                         sym.kind === vscode.SymbolKind.Constructor ||
                         sym.kind === vscode.SymbolKind.Field ||
                         sym.kind === vscode.SymbolKind.Constant
                     ) {
-                        lenses.push(new vscode.CodeLens(sym.selectionRange));
+                        lenses.push(new JavaSymbolCodeLens(sym.selectionRange, sym.kind));
                     }
                     if (sym.children && sym.children.length > 0) {
                         traverse(sym.children);
@@ -192,27 +199,82 @@ class JavaReferencesCodeLensProvider implements vscode.CodeLensProvider {
         codeLens: vscode.CodeLens,
         token: vscode.CancellationToken
     ): Promise<vscode.CodeLens> {
+        if (!(codeLens instanceof JavaSymbolCodeLens)) {
+            return codeLens;
+        }
+
         const activeEditor = vscode.window.activeTextEditor;
         if (!activeEditor) {
             codeLens.command = { title: '🔗 0 usages', command: '' };
             return codeLens;
         }
 
+        const activeUri = activeEditor.document.uri;
+        const position = codeLens.range.start;
+        const kind = codeLens.symbolKind;
+
         try {
-            const locations = await vscode.commands.executeCommand<vscode.Location[]>(
-                'vscode.executeReferenceProvider',
-                activeEditor.document.uri,
-                codeLens.range.start
-            );
+            if (kind === vscode.SymbolKind.Interface) {
+                // Query implementations
+                const impls = await vscode.commands.executeCommand<vscode.Location[]>(
+                    'vscode.executeImplementationProvider',
+                    activeUri,
+                    position
+                );
+                const count = impls ? impls.length : 0;
+                const title = `🔗 ${count} implementation${count === 1 ? '' : 's'}`;
 
-            const count = locations ? locations.length : 0;
-            const title = `🔗 ${count} usage${count === 1 ? '' : 's'}`;
+                codeLens.command = {
+                    title: title,
+                    command: 'editor.action.showReferences',
+                    arguments: [activeUri, position, impls || []]
+                };
+            } else if (kind === vscode.SymbolKind.Class) {
+                // Query implementations (subclasses)
+                const subclasses = await vscode.commands.executeCommand<vscode.Location[]>(
+                    'vscode.executeImplementationProvider',
+                    activeUri,
+                    position
+                );
+                const subclassCount = subclasses ? subclasses.length : 0;
 
-            codeLens.command = {
-                title: title,
-                command: 'editor.action.showReferences',
-                arguments: [activeEditor.document.uri, codeLens.range.start, locations || []]
-            };
+                if (subclassCount > 0) {
+                    const title = `🔗 ${subclassCount} subclass${subclassCount === 1 ? '' : 'es'}`;
+                    codeLens.command = {
+                        title: title,
+                        command: 'editor.action.showReferences',
+                        arguments: [activeUri, position, subclasses || []]
+                    };
+                } else {
+                    // Fallback to general references/usages
+                    const locations = await vscode.commands.executeCommand<vscode.Location[]>(
+                        'vscode.executeReferenceProvider',
+                        activeUri,
+                        position
+                    );
+                    const count = locations ? locations.length : 0;
+                    const title = `🔗 ${count} usage${count === 1 ? '' : 's'}`;
+                    codeLens.command = {
+                        title: title,
+                        command: 'editor.action.showReferences',
+                        arguments: [activeUri, position, locations || []]
+                    };
+                }
+            } else {
+                // Default to general references/usages (for fields, methods, enums, enum members, etc.)
+                const locations = await vscode.commands.executeCommand<vscode.Location[]>(
+                    'vscode.executeReferenceProvider',
+                    activeUri,
+                    position
+                );
+                const count = locations ? locations.length : 0;
+                const title = `🔗 ${count} usage${count === 1 ? '' : 's'}`;
+                codeLens.command = {
+                    title: title,
+                    command: 'editor.action.showReferences',
+                    arguments: [activeUri, position, locations || []]
+                };
+            }
         } catch (error) {
             codeLens.command = {
                 title: '🔗 0 usages',
