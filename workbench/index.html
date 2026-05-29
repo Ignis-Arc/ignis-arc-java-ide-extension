@@ -1,0 +1,397 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>焱虹 Workbench - VS Code WYSIWYG Theme Generator</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="index.css">
+</head>
+<body>
+  <!-- Background Glows -->
+  <div class="glow-orb orb-1"></div>
+  <div class="glow-orb orb-2"></div>
+
+  <header class="app-header">
+    <div class="logo-area">
+      <svg class="brand-logo" viewBox="0 0 24 24">
+        <path fill="currentColor" opacity="0.45" d="M3.5 16.5 C3.5 13.5 7.3 11.5 12 11.5 C16.7 11.5 20.5 13.5 20.5 16.5 C20.5 17.5 19.3 18.5 17.2 19.2 L18.8 20.6 C21.4 19.6 23 18.2 23 16.5 C23 12.5 18.1 9.5 12 9.5 C5.9 9.5 1 12.5 1 16.5 C1 18.2 2.6 19.6 5.2 20.6 L6.8 19.2 C4.7 18.5 3.5 17.5 3.5 16.5 Z" />
+        <path fill="currentColor" d="M12 1.5 C12 1.5 8 6 8 9.5 C8 11.7 9.8 13.5 12 13.5 C14.2 13.5 16 11.7 16 9.5 C16 6 12 1.5 12 1.5 Z M12 11.5 C10.9 11.5 10 10.6 10 9.5 C10 8.2 12 6.2 12 6.2 C12 6.2 14 8.2 14 9.5 C14 10.6 13.1 11.5 12 11.5 Z" />
+        <path fill="currentColor" d="M12 21.5 C7.3 21.5 3.5 19.5 3.5 16.5 C3.5 16.2 3.6 15.9 3.8 15.6 L2.2 14.2 C1.4 14.9 1 15.7 1 16.5 C1 20.5 5.9 23.5 12 23.5 C18.1 23.5 23 20.5 23 16.5 C23 15.7 22.6 14.9 21.8 14.2 L20.2 15.6 C20.4 15.9 20.5 16.2 20.5 16.5 C20.5 19.5 16.7 21.5 12 21.5 Z" />
+      </svg>
+      <h1>焱虹 Workbench <span>所見即所得主題產生器</span></h1>
+    </div>
+    <div class="preset-control">
+      <label for="preset-select">載入經典預設配色：</label>
+      <select id="preset-select">
+        <option value="obsidian">🔥 Ignis Arc Obsidian (經典黑曜石暗色)</option>
+        <option value="pastel">🌸 Ignis Arc Pastel (溫馨粉彩夢境)</option>
+      </select>
+    </div>
+  </header>
+
+  <main class="app-layout">
+    <!-- Left Panel: Simulated VS Code Window -->
+    <section class="mock-workspace">
+      <div class="vscode-window">
+        <!-- Title Bar -->
+        <div class="title-bar">
+          <div class="window-controls">
+            <span class="dot close"></span>
+            <span class="dot minimize"></span>
+            <span class="dot maximize"></span>
+          </div>
+          <div class="file-name">OrderService.java - Ignis Arc Java - Studio Code</div>
+          <div class="window-actions"></div>
+        </div>
+
+        <div class="workspace-body">
+          <!-- Activity Bar -->
+          <div class="activity-bar">
+            <div class="activity-icons">
+              <div class="icon-item active">
+                <svg viewBox="0 0 24 24" width="24" height="24">
+                  <path fill="currentColor" d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z"/>
+                </svg>
+                <span class="badge"></span>
+              </div>
+              <div class="icon-item brand-active">
+                <svg class="brand-logo" viewBox="0 0 24 24" width="24" height="24">
+                  <path fill="currentColor" opacity="0.45" d="M3.5 16.5 C3.5 13.5 7.3 11.5 12 11.5 C16.7 11.5 20.5 13.5 20.5 16.5 C20.5 17.5 19.3 18.5 17.2 19.2 L18.8 20.6 C21.4 19.6 23 18.2 23 16.5 C23 12.5 18.1 9.5 12 9.5 C5.9 9.5 1 12.5 1 16.5 C1 18.2 2.6 19.6 5.2 20.6 L6.8 19.2 C4.7 18.5 3.5 17.5 3.5 16.5 Z" />
+                  <path fill="currentColor" d="M12 1.5 C12 1.5 8 6 8 9.5 C8 11.7 9.8 13.5 12 13.5 C14.2 13.5 16 11.7 16 9.5 C16 6 12 1.5 12 1.5 Z M12 11.5 C10.9 11.5 10 10.6 10 9.5 C10 8.2 12 6.2 12 6.2 C12 6.2 14 8.2 14 9.5 C14 10.6 13.1 11.5 12 11.5 Z" />
+                  <path fill="currentColor" d="M12 21.5 C7.3 21.5 3.5 19.5 3.5 16.5 C3.5 16.2 3.6 15.9 3.8 15.6 L2.2 14.2 C1.4 14.9 1 15.7 1 16.5 C1 20.5 5.9 23.5 12 23.5 C18.1 23.5 23 20.5 23 16.5 C23 15.7 22.6 14.9 21.8 14.2 L20.2 15.6 C20.4 15.9 20.5 16.2 20.5 16.5 C20.5 19.5 16.7 21.5 12 21.5 Z" />
+                </svg>
+              </div>
+            </div>
+            <div class="settings-icon">
+              <svg viewBox="0 0 24 24" width="20" height="20">
+                <path fill="currentColor" d="M19.43 12.98c.04-.32.07-.64.07-.98s-.03-.66-.07-.98l2.11-1.65c.19-.15.24-.42.12-.64l-2-3.46c-.12-.22-.39-.3-.61-.22l-2.49 1c-.52-.4-1.08-.73-1.69-.98l-.38-2.65C14.46 2.18 14.25 2 14 2h-4c-.25 0-.46.18-.49.42l-.38 2.65c-.61.25-1.17.59-1.69.98l-2.49-1c-.23-.09-.49 0-.61.22l-2 3.46c-.13.22-.07.49.12.64l2.11 1.65c-.04.32-.07.65-.07.98s.03.66.07.98l-2.11 1.65c-.19.15-.24.42-.12.64l2 3.46c.12.22.39.3.61.22l2.49-1c.53.4 1.08.73 1.69.98l.38 2.65c.03.24.24.42.49.42h4c.25 0 .46-.18.49-.42l.38-2.65c.61-.25 1.17-.59 1.69-.98l2.49 1c.23.09.49 0 .61-.22l2-3.46c.12-.22.07-.49-.12-.64l-2.11-1.65zM12 15.5c-1.93 0-3.5-1.57-3.5-3.5s1.57-3.5 3.5-3.5 3.5 1.57 3.5 3.5-1.57 3.5-3.5 3.5z"/>
+              </svg>
+            </div>
+          </div>
+
+          <!-- Sidebar -->
+          <div class="sidebar">
+            <div class="sidebar-header">
+              <span>IGNIS ARC JAVA EXPLORER</span>
+              <svg viewBox="0 0 24 24" width="16" height="16">
+                <path fill="currentColor" d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z"/>
+              </svg>
+            </div>
+            <div class="sidebar-content">
+              <div class="tree-item folder expanded">
+                <span class="arrow">▼</span>
+                <span class="folder-icon">📂</span>
+                <span class="label">src</span>
+              </div>
+              <div class="tree-item folder expanded indent-1">
+                <span class="arrow">▼</span>
+                <span class="folder-icon">📂</span>
+                <span class="label">main</span>
+              </div>
+              <div class="tree-item folder expanded indent-2">
+                <span class="arrow">▼</span>
+                <span class="folder-icon">📂</span>
+                <span class="label">java</span>
+              </div>
+              <div class="tree-item folder expanded indent-3">
+                <span class="arrow">▼</span>
+                <span class="folder-icon">📂</span>
+                <span class="label">com.ignis.demo</span>
+              </div>
+              <div class="tree-item file selected indent-4">
+                <span class="file-icon">☕</span>
+                <span class="label">OrderService.java</span>
+              </div>
+              <div class="tree-item file indent-4">
+                <span class="file-icon">☕</span>
+                <span class="label">User.java</span>
+              </div>
+              <div class="tree-item file indent-4">
+                <span class="file-icon">☕</span>
+                <span class="label">PaymentProcessor.java</span>
+              </div>
+              <div class="tree-item file indent-0">
+                <span class="file-icon">⚙️</span>
+                <span class="label">pom.xml</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Main Editor Pane -->
+          <div class="editor-pane">
+            <!-- Tabs -->
+            <div class="tabs-container">
+              <div class="tab active">
+                <span class="tab-icon">☕</span>
+                <span class="tab-label">OrderService.java</span>
+                <span class="tab-close">×</span>
+              </div>
+              <div class="tab">
+                <span class="tab-icon">📝</span>
+                <span class="tab-label">README.md</span>
+                <span class="tab-close">×</span>
+              </div>
+            </div>
+
+            <!-- Code Body -->
+            <div class="editor-area">
+              <div class="line-numbers">
+                <span>12</span>
+                <span>13</span>
+                <span>14</span>
+                <span>15</span>
+                <span>16</span>
+                <span>17</span>
+                <span>18</span>
+                <span>19</span>
+                <span>20</span>
+                <span>21</span>
+                <span>22</span>
+                <span>23</span>
+                <span>24</span>
+                <span>25</span>
+                <span>26</span>
+              </div>
+              <div class="code-lines">
+                <div class="code-line"><span class="token-annotation">@Data</span></div>
+                <div class="code-line"><span class="token-annotation">@Builder</span></div>
+                <div class="code-line"><span class="token-keyword">public</span> <span class="token-keyword">class</span> <span class="token-class">OrderService</span> {</div>
+                <div class="code-line">    </div>
+                <div class="code-line">    <span class="token-comment">// 🔗 3 usages | ⚡ view bytecode | Complexity: 1 (🟢 Low)</span></div>
+                <div class="code-line">    <span class="token-keyword">public</span> <span class="token-keyword">boolean</span> <span class="token-method">processOrder</span>(<span class="token-class">String</span> <span class="token-variable">orderId</span>, <span class="token-keyword">double</span> <span class="token-variable">amount</span>) {</div>
+                <div class="code-line">        <span class="token-control">if</span> (<span class="token-variable">orderId</span> == <span class="token-constant">null</span> || <span class="token-variable">orderId</span>.<span class="token-method">trim</span>().<span class="token-method">isEmpty</span>()) {</div>
+                <div class="code-line">            <span class="token-control">return</span> <span class="token-constant">false</span>;</div>
+                <div class="code-line">        }</div>
+                <div class="code-line">        </div>
+                <div class="code-line">        <span class="token-class">String</span> <span class="token-variable">status</span> = <span class="token-string">"Processing order: "</span> + <span class="token-variable">orderId</span>;</div>
+                <div class="code-line">        <span class="token-class">System</span>.<span class="token-variable">out</span>.<span class="token-method">println</span>(<span class="token-variable">status</span>);</div>
+                <div class="code-line">        </div>
+                <div class="code-line">        <span class="token-control">if</span> (<span class="token-variable">amount</span> &gt; <span class="token-constant">1000.0</span>) {</div>
+                <div class="code-line">            <span class="token-control">return</span> <span class="token-constant">true</span>;</div>
+                <div class="code-line">        }</div>
+                <div class="code-line">        <span class="token-control">return</span> <span class="token-constant">false</span>;</div>
+                <div class="code-line">    }</div>
+                <div class="code-line">}</div>
+              </div>
+            </div>
+
+            <!-- Terminal Area -->
+            <div class="terminal-pane">
+              <div class="terminal-tabs">
+                <span class="term-tab">PROBLEMS</span>
+                <span class="term-tab">OUTPUT</span>
+                <span class="term-tab active">TERMINAL</span>
+              </div>
+              <div class="terminal-body">
+                <span class="term-prompt">$ bun run compile</span>
+                <span class="term-text">tsc -p ./</span>
+                <span class="term-success">✓ Compilation finished with 0 errors. Staging binary bundles...</span>
+                <span class="term-prompt">$ _</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Status Bar -->
+        <div class="status-bar">
+          <div class="left-items">
+            <span class="item">✓ main*</span>
+            <span class="item">⊗ 0 △ 0</span>
+          </div>
+          <div class="right-items">
+            <span class="item">Ln 17, Col 32</span>
+            <span class="item">Spaces: 4</span>
+            <span class="item">UTF-8</span>
+            <span class="item">Java</span>
+            <span class="item theme-name">Ignis Arc Obsidian Dark</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Right Panel: Controls & Options -->
+    <section class="settings-panel">
+      <!-- Tabs for Settings Categories -->
+      <div class="panel-tabs">
+        <button class="setting-tab-btn active" onclick="switchSettingsTab('editor-colors')">視窗配色</button>
+        <button class="setting-tab-btn" onclick="switchSettingsTab('syntax-colors')">語法高亮</button>
+        <button class="setting-tab-btn" onclick="switchSettingsTab('export-actions')">匯出主題</button>
+      </div>
+
+      <!-- Tab Content: Editor Colors -->
+      <div id="editor-colors" class="setting-tab-content active">
+        <h3>編輯器基本配色</h3>
+        <div class="control-group">
+          <div class="color-picker-item">
+            <label>主編輯器背景色</label>
+            <div class="picker-row">
+              <input type="color" id="color-bg" value="#0C0E12">
+              <input type="text" id="text-bg" value="#0C0E12" class="hex-text">
+            </div>
+          </div>
+          <div class="color-picker-item">
+            <label>預設文字前景色</label>
+            <div class="picker-row">
+              <input type="color" id="color-fg" value="#E2E8F0">
+              <input type="text" id="text-fg" value="#E2E8F0" class="hex-text">
+            </div>
+          </div>
+          <div class="color-picker-item">
+            <label>游標顏色</label>
+            <div class="picker-row">
+              <input type="color" id="color-cursor" value="#FA9E42">
+              <input type="text" id="text-cursor" value="#FA9E42" class="hex-text">
+            </div>
+          </div>
+          <div class="color-picker-item">
+            <label>反白選取區域 (帶透明)</label>
+            <div class="picker-row">
+              <input type="color" id="color-select" value="#E24A35">
+              <input type="text" id="text-select" value="#E24A3533" class="hex-text">
+            </div>
+          </div>
+        </div>
+
+        <h3>工作區 UI 配色</h3>
+        <div class="control-group">
+          <div class="color-picker-item">
+            <label>活動列背景 (Activity Bar)</label>
+            <div class="picker-row">
+              <input type="color" id="color-activity-bg" value="#07080B">
+              <input type="text" id="text-activity-bg" value="#07080B" class="hex-text">
+            </div>
+          </div>
+          <div class="color-picker-item">
+            <label>檔案樹背景 (Side Bar)</label>
+            <div class="picker-row">
+              <input type="color" id="color-sidebar-bg" value="#090B0E">
+              <input type="text" id="text-sidebar-bg" value="#090B0E" class="hex-text">
+            </div>
+          </div>
+          <div class="color-picker-item">
+            <label>狀態列背景 (Status Bar)</label>
+            <div class="picker-row">
+              <input type="color" id="color-statusbar-bg" value="#07080B">
+              <input type="text" id="text-statusbar-bg" value="#07080B" class="hex-text">
+            </div>
+          </div>
+          <div class="color-picker-item">
+            <label>主選取高亮 (Accent Color)</label>
+            <div class="picker-row">
+              <input type="color" id="color-accent" value="#E24A35">
+              <input type="text" id="text-accent" value="#E24A35" class="hex-text">
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Tab Content: Syntax Colors -->
+      <div id="syntax-colors" class="setting-tab-content">
+        <h3>程式碼語法高亮</h3>
+        <div class="control-group">
+          <div class="color-picker-item">
+            <label>宣告關鍵字 (Keyword: public, class)</label>
+            <div class="picker-row">
+              <input type="color" id="color-keyword" value="#E24A35">
+              <input type="text" id="text-keyword" value="#E24A35" class="hex-text">
+            </div>
+          </div>
+          <div class="color-picker-item">
+            <label>控制流與邏輯 (Control: if, return)</label>
+            <div class="picker-row">
+              <input type="color" id="color-control" value="#FA9E42">
+              <input type="text" id="text-control" value="#FA9E42" class="hex-text">
+            </div>
+          </div>
+          <div class="color-picker-item">
+            <label>類別與物件類型 (Class/Type)</label>
+            <div class="picker-row">
+              <input type="color" id="color-class" value="#B794F4">
+              <input type="text" id="text-class" value="#B794F4" class="hex-text">
+            </div>
+          </div>
+          <div class="color-picker-item">
+            <label>方法與函數呼叫 (Method/Function)</label>
+            <div class="picker-row">
+              <input type="color" id="color-method" value="#63B3ED">
+              <input type="text" id="text-method" value="#63B3ED" class="hex-text">
+            </div>
+          </div>
+          <div class="color-picker-item">
+            <label>字串字面量 (String)</label>
+            <div class="picker-row">
+              <input type="color" id="color-string" value="#38B2AC">
+              <input type="text" id="text-string" value="#38B2AC" class="hex-text">
+            </div>
+          </div>
+          <div class="color-picker-item">
+            <label>一般變數與參數 (Variable)</label>
+            <div class="picker-row">
+              <input type="color" id="color-variable" value="#CBD5E0">
+              <input type="text" id="text-variable" value="#CBD5E0" class="hex-text">
+            </div>
+          </div>
+          <div class="color-picker-item">
+            <label>常數與數值 (Constant/Number: null, 100.0)</label>
+            <div class="picker-row">
+              <input type="color" id="color-constant" value="#ED64A6">
+              <input type="text" id="text-constant" value="#ED64A6" class="hex-text">
+            </div>
+          </div>
+          <div class="color-picker-item">
+            <label>註解說明 (Comment)</label>
+            <div class="picker-row">
+              <input type="color" id="color-comment" value="#64748B">
+              <input type="text" id="text-comment" value="#64748B" class="hex-text">
+            </div>
+          </div>
+          <div class="color-picker-item">
+            <label>類別註解與裝飾元 (Annotation: @Data)</label>
+            <div class="picker-row">
+              <input type="color" id="color-annotation" value="#FA9E42">
+              <input type="text" id="text-annotation" value="#FA9E42" class="hex-text">
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Tab Content: Export Actions -->
+      <div id="export-actions" class="setting-tab-content">
+        <h3>匯出與套用您的自訂主題</h3>
+        <p class="export-desc">當您調配出滿意的配色後，您可以使用以下方式將其套用至 VS Code / Cursor 焱虹外掛包中：</p>
+        
+        <div class="action-buttons">
+          <button class="btn btn-primary" onclick="downloadThemeJSON()">📥 下載 themes/ignis-arc-obsidian.json</button>
+          <button class="btn btn-secondary" onclick="copyThemeJSON()">📋 複製主題 JSON 代碼</button>
+        </div>
+
+        <div class="instruction-box">
+          <h4>💡 套用說明步驟：</h4>
+          <ol>
+            <li>點選 <strong>「下載」</strong> 按鈕取得 <code>ignis-arc-obsidian.json</code> 檔案。</li>
+            <li>將下載好的檔案覆蓋您擴充套件專案路徑下的 <code>themes/ignis-arc-obsidian.json</code>。</li>
+            <li>在擴充套件根目錄執行本機打包指令：
+              <pre><code>bun x vsce package --no-dependencies</code></pre>
+            </li>
+            <li>雙擊重新安裝生成的 <code>.vsix</code>，重載 VS Code 後即可看到您設計的自定義主題！</li>
+          </ol>
+        </div>
+
+        <div class="json-preview-container">
+          <label>主題 JSON 即時預覽：</label>
+          <textarea id="json-preview" readonly></textarea>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="app-footer">
+    <p>© 2026 Ignis Arc Java IDE Extension Pack. Designed with Google Gemini-3.5-Flash Developer Agent.</p>
+  </footer>
+
+  <script src="index.js"></script>
+</body>
+</html>

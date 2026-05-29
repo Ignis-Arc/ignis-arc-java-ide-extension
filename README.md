@@ -79,6 +79,29 @@ Bring advanced low-level bytecode tuning directly into VS Code, with class struc
 
 ---
 
+### 5. Ignis Arc Obsidian Dark Color Theme
+
+A gorgeous, brand-aligned VS Code color theme built natively into the extension pack:
+*   **Obsidian Dark Foundation**: Uses a deep, warm dark gray charcoal background (`#0C0E12`) that reduces eye strain and provides rich visual depth compared to default dark themes.
+*   **Fiery Flame Accents**: Keywords, operators, and control flows feature warm crimson red (`#E24A35`) and sunset amber orange (`#FA9E42`) tones, reflecting the *Ignis (焱)* flame identity.
+*   **Aurora Arc Highlights**: Class names, types, and annotations showcase soft violet (`#B794F4`), and strings use celedon cyan (`#38B2AC`), mirroring the *Arc (虹)* color gradient.
+
+![Ignis Arc Obsidian Dark Theme](images/theme_mockup.png)
+
+---
+
+### 6. Ignis Arc Workbench (Interactive Theme Generator)
+
+Don't settle for pre-defined colors. The extension includes a beautiful, offline-capable **WYSIWYG Theme Generator** page:
+*   **Live Simulated Workspace**: Real-time rendering of a complete VS Code editor, sidebar, and status bar displaying standard Java code.
+*   **Intuitive Color Pickers**: Separates customization into *Editor Windows*, *Workspace UI*, and *Token Syntax Colors* (Keywords, Flow Control, Types, Methods, Strings, Comments, Annotations).
+*   **Built-in Class Preset Themes**: One-click toggles between `Obsidian Dark` and the dreamy `Pastel Dream` palettes.
+*   **Direct Exporting**: Instantly compile and download your bespoke `ignis-arc-obsidian.json` config, or copy the compiled JSON text directly to your clipboard.
+
+To customize your workspace theme, simply open [workbench/index.html](file:///home/luke/projects/java-lsp/ignis-arc-java-ide-extension/workbench/index.html) in your browser!
+
+---
+
 ## ⚙️ Extension Settings
 
 You can customize thresholds, toggles, and features in your global VS Code `settings.json`:

@@ -2,6 +2,51 @@
 
 All notable changes to the **Ignis Arc Java IDE Extension Pack** will be documented in this file.
 
+## [0.1.8] - 2026-05-29
+
+This release introduces a stunning, built-in **Ignis Arc Obsidian Dark** color theme, adds a gorgeous offline-capable **Interactive Theme Generator Workbench (WYSIWYG)**, adds bulletproof, generalized Lombok & synthetic symbol filtering across all DocumentSymbol kinds, eliminating duplicate/redundant Code Lenses on class annotations, and refines the side-by-side screenshot gallery in both READMEs for a premium marketplace presentation.
+
+### Added
+*   **Interactive Theme Generator Workbench (WYSIWYG)**: Created a beautiful, offline-capable single page web application in `workbench/index.html` allowing developers to customize editor colors, UI parameters, and syntax tokens via real-time live preview inside a simulated VS Code environment, with one-click JSON exporting and preset loading.
+*   **Ignis Arc Obsidian Dark Theme**: Designed a brand-aligned, high-fidelity dark color theme built natively into the extension pack, featuring a deep obsidian charcoal background (`#0C0E12`), fiery orange/red control flows (`#FA9E42` / `#E24A35`), and aurora violet class and type mappings (`#B794F4`).
+
+### Fixed
+*   **Generalized Lombok/Synthetic Symbol Filtering**: Upgraded `isSyntheticSymbol` in the Code Lens provider to inspect and filter all document symbol kinds (not just methods or classes). This completely removes duplicate `🔗 X usages` lenses generated for class-level Lombok annotations like `@Data` and `@Builder` (e.g., `equals`, `hashCode`, `toString`, `canEqual` being misclassified by LSP as non-method types).
+*   **Pristine Subclass Peek Views**: Strengthened filtering to ensure synthetic inner builder classes (like `UserBuilder` via `@Builder`) do not populate subclass peek views, keeping subclass/implementation lenses clean and accurate.
+
+---
+
+## [0.1.7] - 2026-05-29
+
+This release adds a highly requested Local Variable Table (LVT) Explorer for compiled JVM bytecode, and implements double-stage method lenses that concurrently resolve both method invocations and implementation overrides.
+
+### Added
+*   **Local Variable Table (LVT) Explorer**: Extends the ASM-based decompiler backend via a custom `IgnisMethodTextifier` subclass. Bytecode method definitions now display a clean, sorted ASCII table mapping raw JVM registers/slots to handwritten parameter and variable names with their corresponding type descriptors.
+*   **Double-Stage Method Lenses**: Upgraded references resolution for `Method` and `Function` symbols to concurrently run both Reference and Implementation providers, allowing method lenses to cleanly distinguish between calls (`usages`) and overrides (`implementations`).
+*   **Enhanced Clickable Targets**: Methods and functions now union their usages and implementations into their click arguments. The lens remains 100% clickable even if usages count is `0`, falling back gracefully to implementation peek views.
+
+---
+
+## [0.1.6] - 2026-05-28
+
+This release brings interactive, dual-pane JVM bytecode scroll synchronization, a hover explanation system, and Constant Pool decoding.
+
+### Added
+*   **Synchronized Scroll & Highlighting**: Integrates real-time, bidirectional scroll synchronization between handwritten Java source code and decompiled bytecode via ASM line number tracing.
+*   **Constant Pool Explorer**: Automatically extracts and displays the full class constant pool at the top of the decompilation view, detailing strings, constants, and references.
+*   **JVM Instruction Hovers**: Hovering over any bytecode instruction mnemonic shows a detailed Operand Stack transition diagram and runtime execution description.
+
+---
+
+## [0.1.5] - 2026-05-28
+
+Initial release of the ASM-powered split-screen JVM bytecode decompiler.
+
+### Added
+*   **ASM Bytecode Decompiler**: Swaps text-based class disassembly for a high-fidelity, ASM-powered decompiler showing complete JVM instructions, stack sizes, and local registers natively in VS Code.
+
+---
+
 ## [0.1.4] - 2026-05-28
 
 This release introduces bulletproof JRE container library querying and high-fidelity reference filters (removing class declarations, constructors, and imports) to deliver the ultimate clean Code Review experience.
