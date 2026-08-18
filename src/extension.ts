@@ -27,141 +27,55 @@ interface MethodMetric {
     speedLabel?: string;
 }
 
-function buildComplexityHover(metric: MethodMetric, range?: vscode.Range): vscode.Hover {
-    const config = vscode.workspace.getConfiguration('ignis.java.complexity');
-    const highThreshold = config.get<number>('highThreshold', 30);
-    const criticalThreshold = config.get<number>('criticalThreshold', 60);
-
-    let rating = '🟢 Low (Safe)';
-    let advice = 'This function is clean, easy to comprehend, and has minimal performance overhead. Great job!';
-    if (metric.complexity >= criticalThreshold) {
-        rating = '🔴 Critical (Refactoring Recommended)';
-        advice = 'This method has deep loop nesting (O(N^2)/O(N^3)) or excessive decision branches. Refactor by extracting helper methods, using map lookups, or flattening stream operations.';
-    } else if (metric.complexity >= highThreshold) {
-        rating = '🟡 Moderate / Warning';
-        advice = 'This function contains nested loops or multiple branching structures. Review whether loop nesting can be avoided or conditions simplified.';
-    }
-
-    const md = new vscode.MarkdownString();
-    md.isTrusted = true;
-    md.supportHtml = true;
-
-    md.appendMarkdown(`### ⚡ Ignis Arc • Performance & Complexity Profile\n\n`);
-    md.appendMarkdown(`**Method:** \`${metric.name}\`  \n`);
-    md.appendMarkdown(`**Cognitive Complexity:** \`${metric.complexity}\` (${rating})\n\n`);
-
-    if (metric.bytecodeSize !== undefined && metric.bytecodeSize > 0) {
-        const inlineStatus = metric.bytecodeSize < 35 
-            ? '⚡ Trivial Inline (Zero Invocation Overhead)' 
-            : metric.bytecodeSize > 325 
-            ? '⚠️ Inline Refused (Exceeds 325B)' 
-            : '✅ Inlinable in Hot Paths';
-        const gcStatus = (metric.loopAllocations && metric.loopAllocations > 0)
-            ? `⚠️ ${metric.loopAllocations} Loop Allocation(s) (GC Pressure)`
-            : '0 Loop Allocs (Clean & Low GC)';
-
-        md.appendMarkdown(`| Metric | Value | Status |\n`);
-        md.appendMarkdown(`| :--- | :--- | :--- |\n`);
-        md.appendMarkdown(`| **Speed Tier** | ${metric.speedEmoji || '✈️'} **${(metric.speedTier || 'airplane').toUpperCase()}** | JVM HotSpot Classification |\n`);
-        md.appendMarkdown(`| **Bytecode Size** | \`${metric.bytecodeSize} bytes\` | ${inlineStatus} |\n`);
-        md.appendMarkdown(`| **Memory / GC** | \`${metric.loopAllocations || 0} in loop\` | ${gcStatus} |\n`);
-        md.appendMarkdown(`| **Stack Frame** | \`MaxStack: ${metric.maxStack || 0}\` | \`MaxLocals: ${metric.maxLocals || 0}\` |\n\n`);
-    }
-
-    md.appendMarkdown(`> 💡 **Tuning Advice**: ${advice}\n`);
-
-    return new vscode.Hover(md, range);
-}
-
-// In-memory document metrics cache for instantaneous hover responses
-const documentMetricsCache = new Map<string, { version: number; metrics: MethodMetric[] }>();
-
 function registerComplexityLens(context: vscode.ExtensionContext) {
-    // Command for interactive floating hover trigger
+    // Command for interactive explanation (lightweight notification, non-modal)
     context.subscriptions.push(
-        vscode.commands.registerCommand('ignis.java.complexity.explain', async (metric: MethodMetric) => {
-            const editor = vscode.window.activeTextEditor;
-            if (!editor) {
-                return;
+        vscode.commands.registerCommand('ignis.java.complexity.explain', (metric: MethodMetric) => {
+            const config = vscode.workspace.getConfiguration('ignis.java.complexity');
+            const highThreshold = config.get<number>('highThreshold', 30);
+            const criticalThreshold = config.get<number>('criticalThreshold', 60);
+
+            let rating = '🟢 Low (Safe)';
+            let advice = 'This function is clean, easy to comprehend, and has minimal performance overhead. Great job!';
+            if (metric.complexity >= criticalThreshold) {
+                rating = '🔴 Critical (Refactoring Recommended)';
+                advice = 'This method has deep loop nesting (O(N^2)/O(N^3)) or excessive decision branches. Refactor by extracting helper methods, using lookups/maps, or flattening stream operations.';
+            } else if (metric.complexity >= highThreshold) {
+                rating = '🟡 Moderate / Warning';
+                advice = 'This function contains nested loops or multiple branching structures. Review whether loop nesting can be avoided or conditions simplified.';
             }
-            const targetLine = Math.max(0, metric.startLine - 1);
-            const lineText = editor.document.lineAt(targetLine).text;
-            const nameIdx = lineText.indexOf(metric.name);
-            const charIdx = nameIdx >= 0 ? nameIdx : 4;
-            const pos = new vscode.Position(targetLine, charIdx);
-            
-            editor.selection = new vscode.Selection(pos, pos);
-            editor.revealRange(new vscode.Range(pos, pos), vscode.TextEditorRevealType.InCenterIfOutsideViewport);
-            await vscode.commands.executeCommand('editor.action.showHover');
+
+            let speedReport = '';
+            if (metric.speedEmoji && metric.bytecodeSize !== undefined && metric.bytecodeSize > 0) {
+                const inlineNote = metric.bytecodeSize < 35 
+                    ? '(Trivial Inline ⚡ - Zero Call Overhead)' 
+                    : metric.bytecodeSize > 325 
+                    ? '(JIT Inline Refused ⚠️ - Exceeds 325B)' 
+                    : '(JIT Inlinable in Hot Paths)';
+                const allocNote = (metric.loopAllocations && metric.loopAllocations > 0)
+                    ? `⚠️ ${metric.loopAllocations} Heap Allocation(s) in loop (GC Pressure)`
+                    : '0 Loop Allocations (Clean)';
+
+                speedReport = `\n\n⚡ Speed Tier: ${metric.speedEmoji} ${(metric.speedTier || 'airplane').toUpperCase()} | Size: ${metric.bytecodeSize}B ${inlineNote}\n💣 GC: ${allocNote} | 🥞 Frame: Stack=${metric.maxStack || 0}, Locals=${metric.maxLocals || 0}`;
+            }
+
+            vscode.window.showInformationMessage(
+                `Method "${metric.name}" Complexity: ${metric.complexity} [${rating}]\n${advice}${speedReport}`
+            );
         })
     );
 
-    // Register Code Lens & Hover Providers
+    // Register Code Lens Providers
     const docSelector: vscode.DocumentSelector = { scheme: 'file', language: 'java' };
     const codeLensProvider = new JavaComplexityCodeLensProvider();
     const referencesLensProvider = new JavaReferencesCodeLensProvider();
-    const hoverProvider = new JavaComplexityHoverProvider();
     complexityCodeLensProvider = codeLensProvider;
     referencesCodeLensProvider = referencesLensProvider;
 
     context.subscriptions.push(
         vscode.languages.registerCodeLensProvider(docSelector, codeLensProvider),
-        vscode.languages.registerCodeLensProvider(docSelector, referencesLensProvider),
-        vscode.languages.registerHoverProvider(docSelector, hoverProvider)
+        vscode.languages.registerCodeLensProvider(docSelector, referencesLensProvider)
     );
-}
-
-class JavaComplexityHoverProvider implements vscode.HoverProvider {
-    async provideHover(
-        document: vscode.TextDocument,
-        position: vscode.Position,
-        token: vscode.CancellationToken
-    ): Promise<vscode.Hover | null> {
-        if (!jdtlsReady) {
-            return null;
-        }
-
-        const config = vscode.workspace.getConfiguration('ignis.java.complexity');
-        if (!config.get<boolean>('enabled', true)) {
-            return null;
-        }
-
-        let cached = documentMetricsCache.get(document.uri.toString());
-        let metrics: MethodMetric[] | undefined = cached && cached.version === document.version ? cached.metrics : undefined;
-
-        if (!metrics) {
-            try {
-                metrics = await vscode.commands.executeCommand<MethodMetric[]>(
-                    'java.execute.workspaceCommand',
-                    'ignis.java.complexity.calculate',
-                    document.uri.toString()
-                );
-                if (metrics) {
-                    documentMetricsCache.set(document.uri.toString(), {
-                        version: document.version,
-                        metrics: metrics
-                    });
-                }
-            } catch (error) {
-                return null;
-            }
-        }
-
-        if (!metrics || metrics.length === 0) {
-            return null;
-        }
-
-        const line = position.line + 1; // 1-indexed
-        for (const metric of metrics) {
-            if (line === metric.startLine) {
-                const wordRange = document.getWordRangeAtPosition(position);
-                const lineRange = new vscode.Range(position.line, 0, position.line, document.lineAt(position.line).text.length);
-                return buildComplexityHover(metric, wordRange || lineRange);
-            }
-        }
-
-        return null;
-    }
 }
 
 class JavaComplexityCodeLensProvider implements vscode.CodeLensProvider {
@@ -207,11 +121,6 @@ class JavaComplexityCodeLensProvider implements vscode.CodeLensProvider {
             if (!metrics || metrics.length === 0) {
                 return [];
             }
-
-            documentMetricsCache.set(document.uri.toString(), {
-                version: document.version,
-                metrics: metrics
-            });
 
             const lenses: vscode.CodeLens[] = [];
 
