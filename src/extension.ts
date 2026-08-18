@@ -25,21 +25,21 @@ function registerComplexityLens(context: vscode.ExtensionContext) {
     context.subscriptions.push(
         vscode.commands.registerCommand('ignis.java.complexity.explain', (metric: MethodMetric) => {
             const config = vscode.workspace.getConfiguration('ignis.java.complexity');
-            const highThreshold = config.get<number>('highThreshold', 10);
-            const mediumThreshold = config.get<number>('mediumThreshold', 5);
+            const highThreshold = config.get<number>('highThreshold', 30);
+            const criticalThreshold = config.get<number>('criticalThreshold', 60);
 
-            let rating = 'Low';
-            let advice = 'This function is simple and easy to maintain. Great job!';
-            if (metric.complexity >= highThreshold) {
-                rating = 'High (Refactoring Recommended)';
-                advice = 'This function has too many decision paths. Consider breaking it down into smaller helper methods to improve readability, debuggability, and testability.';
-            } else if (metric.complexity >= mediumThreshold) {
-                rating = 'Moderate';
-                advice = 'This function is moderately complex. Keep an eye on it to ensure it does not grow further.';
+            let rating = 'Low (Safe)';
+            let advice = 'This function is clean, easy to comprehend, and has minimal performance overhead. Great job!';
+            if (metric.complexity >= criticalThreshold) {
+                rating = 'Critical (Refactoring Strongly Recommended)';
+                advice = 'This method has deep loop nesting (O(N^2)/O(N^3)) or excessive decision branches. Refactor by extracting helper methods, using lookups/maps, or flattening stream operations.';
+            } else if (metric.complexity >= highThreshold) {
+                rating = 'Moderate / High (Review Recommended)';
+                advice = 'This function contains nested loops or multiple branching structures. Review whether loop nesting can be avoided or conditions simplified.';
             }
 
             vscode.window.showInformationMessage(
-                `Method "${metric.name}" Cyclomatic Complexity: ${metric.complexity} [${rating}]\n\n${advice}`,
+                `Method "${metric.name}" Complexity Score: ${metric.complexity} [${rating}]\n\n${advice}`,
                 { modal: true }
             );
         })
@@ -87,8 +87,8 @@ class JavaComplexityCodeLensProvider implements vscode.CodeLensProvider {
             return [];
         }
 
-        const highThreshold = config.get<number>('highThreshold', 10);
-        const mediumThreshold = config.get<number>('mediumThreshold', 5);
+        const highThreshold = config.get<number>('highThreshold', 30);
+        const criticalThreshold = config.get<number>('criticalThreshold', 60);
 
         try {
             const metrics = await vscode.commands.executeCommand<MethodMetric[]>(
@@ -108,9 +108,9 @@ class JavaComplexityCodeLensProvider implements vscode.CodeLensProvider {
                 const range = new vscode.Range(line, 0, line, 0);
 
                 let rating = '🟢 Low';
-                if (metric.complexity >= highThreshold) {
-                    rating = '🔴 High';
-                } else if (metric.complexity >= mediumThreshold) {
+                if (metric.complexity >= criticalThreshold) {
+                    rating = '🔴 Critical';
+                } else if (metric.complexity >= highThreshold) {
                     rating = '🟡 Moderate';
                 }
 
@@ -907,6 +907,151 @@ class IgnisJavaProjectTreeDataProvider implements vscode.TreeDataProvider<IgnisJ
     }
 }
 
+function resolveTargetDirectory(item?: IgnisJavaTreeItem | vscode.Uri): string | undefined {
+    if (item instanceof vscode.Uri) {
+        try {
+            const stat = fs.statSync(item.fsPath);
+            return stat.isDirectory() ? item.fsPath : path.dirname(item.fsPath);
+        } catch {
+            return path.dirname(item.fsPath);
+        }
+    }
+    if (item && item.pathValue) {
+        if (item.type === NodeType.LocalFolder || item.type === NodeType.ProjectRoot) {
+            return item.pathValue;
+        }
+        if (item.type === NodeType.LocalFile) {
+            return path.dirname(item.pathValue);
+        }
+    }
+    if (vscode.window.activeTextEditor && vscode.window.activeTextEditor.document.uri.scheme === 'file') {
+        return path.dirname(vscode.window.activeTextEditor.document.uri.fsPath);
+    }
+    const folders = vscode.workspace.workspaceFolders;
+    if (folders && folders.length > 0) {
+        return folders[0].uri.fsPath;
+    }
+    return undefined;
+}
+
+function resolveItemUri(item?: IgnisJavaTreeItem | vscode.Uri): vscode.Uri | undefined {
+    if (item instanceof vscode.Uri) {
+        return item;
+    }
+    if (item && item.resourceUri) {
+        return item.resourceUri;
+    }
+    if (item && item.pathValue) {
+        return vscode.Uri.file(item.pathValue);
+    }
+    if (vscode.window.activeTextEditor) {
+        return vscode.window.activeTextEditor.document.uri;
+    }
+    return undefined;
+}
+
+function getJavaPackageFromPath(folderPath: string): string | undefined {
+    const normalized = folderPath.replace(/\\/g, '/');
+    const matches = [
+        '/src/main/java/',
+        '/src/test/java/',
+        '/src/java/',
+        '/src/'
+    ];
+    for (const m of matches) {
+        const idx = normalized.lastIndexOf(m);
+        if (idx !== -1) {
+            const sub = normalized.substring(idx + m.length);
+            if (sub) {
+                return sub.replace(/\//g, '.');
+            }
+            return '';
+        }
+    }
+    return undefined;
+}
+
+async function createJavaTypeFile(
+    item: IgnisJavaTreeItem | vscode.Uri | undefined,
+    typeKind: 'class' | 'interface' | 'enum' | 'record',
+    treeDataProvider: IgnisJavaProjectTreeDataProvider
+) {
+    const targetDir = resolveTargetDirectory(item);
+    if (!targetDir) {
+        vscode.window.showErrorMessage('Unable to determine destination directory.');
+        return;
+    }
+
+    const typeLabel = typeKind.charAt(0).toUpperCase() + typeKind.slice(1);
+    const input = await vscode.window.showInputBox({
+        prompt: `Enter Java ${typeLabel} name (e.g. OrderValidator or com.ignis.demo.OrderValidator)`,
+        placeHolder: `My${typeLabel}`
+    });
+
+    if (!input || input.trim() === '') {
+        return;
+    }
+
+    let rawInput = input.trim();
+    if (rawInput.endsWith('.java')) {
+        rawInput = rawInput.substring(0, rawInput.length - 5);
+    }
+
+    let finalDir = targetDir;
+    let typeName = rawInput;
+    let pkg = getJavaPackageFromPath(targetDir);
+
+    if (rawInput.includes('.')) {
+        const parts = rawInput.split('.');
+        typeName = parts[parts.length - 1];
+        const extraPkgParts = parts.slice(0, parts.length - 1);
+        finalDir = path.join(targetDir, ...extraPkgParts);
+        const addedPkg = extraPkgParts.join('.');
+        pkg = pkg ? `${pkg}.${addedPkg}` : addedPkg;
+    }
+
+    const fileName = `${typeName}.java`;
+    const filePath = path.join(finalDir, fileName);
+    const fileUri = vscode.Uri.file(filePath);
+
+    try {
+        await vscode.workspace.fs.stat(fileUri);
+        vscode.window.showWarningMessage(`File ${fileName} already exists.`);
+        const doc = await vscode.workspace.openTextDocument(fileUri);
+        await vscode.window.showTextDocument(doc);
+        return;
+    } catch {
+        // File does not exist, proceed
+    }
+
+    // Generate template content
+    let content = '';
+    if (pkg) {
+        content += `package ${pkg};\n\n`;
+    }
+
+    if (typeKind === 'record') {
+        content += `public record ${typeName}() {\n    \n}\n`;
+    } else {
+        content += `public ${typeKind} ${typeName} {\n    \n}\n`;
+    }
+
+    try {
+        await vscode.workspace.fs.createDirectory(vscode.Uri.file(finalDir));
+        await vscode.workspace.fs.writeFile(fileUri, Buffer.from(content, 'utf8'));
+        treeDataProvider.refresh();
+
+        const doc = await vscode.workspace.openTextDocument(fileUri);
+        const editor = await vscode.window.showTextDocument(doc);
+
+        const line = pkg ? 3 : 1;
+        const pos = new vscode.Position(line, 4);
+        editor.selection = new vscode.Selection(pos, pos);
+    } catch (err: any) {
+        vscode.window.showErrorMessage(`Failed to create Java ${typeLabel}: ${err.message || err}`);
+    }
+}
+
 // ==========================================
 // 3. Complexity Explorer Sideview
 // ==========================================
@@ -932,7 +1077,7 @@ class IgnisJavaComplexityTreeDataProvider implements vscode.TreeDataProvider<Com
 
     getTreeItem(element: ComplexityItem): vscode.TreeItem {
         const config = vscode.workspace.getConfiguration('ignis.java.complexity');
-        const criticalThreshold = config.get<number>('criticalThreshold', 20);
+        const criticalThreshold = config.get<number>('criticalThreshold', 60);
         const isCritical = element.complexity >= criticalThreshold;
 
         const treeItem = new vscode.TreeItem(
@@ -974,7 +1119,7 @@ class IgnisJavaComplexityTreeDataProvider implements vscode.TreeDataProvider<Com
             return [];
         }
 
-        const highThreshold = config.get<number>('highThreshold', 10);
+        const highThreshold = config.get<number>('highThreshold', 30);
 
         try {
             const results = await vscode.commands.executeCommand<ComplexityItem[]>(
@@ -1080,6 +1225,137 @@ export async function activate(context: vscode.ExtensionContext) {
         vscode.commands.registerCommand('ignis.java.navigator.refresh', () => {
             treeDataProvider.clearCache();
             treeDataProvider.refresh();
+        }),
+        vscode.commands.registerCommand('ignis.java.navigator.newFile', async (item?: IgnisJavaTreeItem | vscode.Uri) => {
+            const targetDir = resolveTargetDirectory(item);
+            if (!targetDir) {
+                vscode.window.showErrorMessage('Unable to determine destination directory.');
+                return;
+            }
+            const fileName = await vscode.window.showInputBox({
+                prompt: 'Enter new file name',
+                placeHolder: 'file.txt'
+            });
+            if (!fileName || fileName.trim() === '') {
+                return;
+            }
+            const fileUri = vscode.Uri.file(path.join(targetDir, fileName.trim()));
+            try {
+                await vscode.workspace.fs.writeFile(fileUri, new Uint8Array());
+                treeDataProvider.refresh();
+                const doc = await vscode.workspace.openTextDocument(fileUri);
+                await vscode.window.showTextDocument(doc);
+            } catch (err: any) {
+                vscode.window.showErrorMessage(`Failed to create file: ${err.message || err}`);
+            }
+        }),
+        vscode.commands.registerCommand('ignis.java.navigator.newFolder', async (item?: IgnisJavaTreeItem | vscode.Uri) => {
+            const targetDir = resolveTargetDirectory(item);
+            if (!targetDir) {
+                vscode.window.showErrorMessage('Unable to determine destination directory.');
+                return;
+            }
+            const folderName = await vscode.window.showInputBox({
+                prompt: 'Enter new folder name',
+                placeHolder: 'new-folder'
+            });
+            if (!folderName || folderName.trim() === '') {
+                return;
+            }
+            const folderUri = vscode.Uri.file(path.join(targetDir, folderName.trim()));
+            try {
+                await vscode.workspace.fs.createDirectory(folderUri);
+                treeDataProvider.refresh();
+            } catch (err: any) {
+                vscode.window.showErrorMessage(`Failed to create folder: ${err.message || err}`);
+            }
+        }),
+        vscode.commands.registerCommand('ignis.java.navigator.newJavaClass', async (item?: IgnisJavaTreeItem | vscode.Uri) => {
+            await createJavaTypeFile(item, 'class', treeDataProvider);
+        }),
+        vscode.commands.registerCommand('ignis.java.navigator.newJavaInterface', async (item?: IgnisJavaTreeItem | vscode.Uri) => {
+            await createJavaTypeFile(item, 'interface', treeDataProvider);
+        }),
+        vscode.commands.registerCommand('ignis.java.navigator.newJavaEnum', async (item?: IgnisJavaTreeItem | vscode.Uri) => {
+            await createJavaTypeFile(item, 'enum', treeDataProvider);
+        }),
+        vscode.commands.registerCommand('ignis.java.navigator.newJavaRecord', async (item?: IgnisJavaTreeItem | vscode.Uri) => {
+            await createJavaTypeFile(item, 'record', treeDataProvider);
+        }),
+        vscode.commands.registerCommand('ignis.java.navigator.revealInOS', async (item?: IgnisJavaTreeItem | vscode.Uri) => {
+            const uri = resolveItemUri(item);
+            if (uri && uri.scheme === 'file') {
+                await vscode.commands.executeCommand('revealFileInOS', uri);
+            }
+        }),
+        vscode.commands.registerCommand('ignis.java.navigator.openInTerminal', async (item?: IgnisJavaTreeItem | vscode.Uri) => {
+            const targetDir = resolveTargetDirectory(item);
+            if (targetDir) {
+                const term = vscode.window.createTerminal({ cwd: targetDir });
+                term.show();
+            }
+        }),
+        vscode.commands.registerCommand('ignis.java.navigator.revealInExplorer', async (item?: IgnisJavaTreeItem | vscode.Uri) => {
+            const uri = resolveItemUri(item);
+            if (uri && uri.scheme === 'file') {
+                await vscode.commands.executeCommand('revealInExplorer', uri);
+            }
+        }),
+        vscode.commands.registerCommand('ignis.java.navigator.copyPath', async (item?: IgnisJavaTreeItem | vscode.Uri) => {
+            const uri = resolveItemUri(item);
+            if (uri && uri.scheme === 'file') {
+                await vscode.env.clipboard.writeText(uri.fsPath);
+            } else if (item && 'pathValue' in item && item.pathValue) {
+                await vscode.env.clipboard.writeText(item.pathValue);
+            }
+        }),
+        vscode.commands.registerCommand('ignis.java.navigator.copyRelativePath', async (item?: IgnisJavaTreeItem | vscode.Uri) => {
+            const uri = resolveItemUri(item);
+            if (uri && uri.scheme === 'file') {
+                const rel = vscode.workspace.asRelativePath(uri);
+                await vscode.env.clipboard.writeText(rel);
+            }
+        }),
+        vscode.commands.registerCommand('ignis.java.navigator.rename', async (item?: IgnisJavaTreeItem | vscode.Uri) => {
+            const uri = resolveItemUri(item);
+            if (!uri || uri.scheme !== 'file') {
+                return;
+            }
+            const oldName = path.basename(uri.fsPath);
+            const newName = await vscode.window.showInputBox({
+                prompt: 'Enter new name',
+                value: oldName
+            });
+            if (!newName || newName.trim() === '' || newName.trim() === oldName) {
+                return;
+            }
+            const newUri = vscode.Uri.file(path.join(path.dirname(uri.fsPath), newName.trim()));
+            try {
+                await vscode.workspace.fs.rename(uri, newUri, { overwrite: false });
+                treeDataProvider.refresh();
+            } catch (err: any) {
+                vscode.window.showErrorMessage(`Failed to rename: ${err.message || err}`);
+            }
+        }),
+        vscode.commands.registerCommand('ignis.java.navigator.delete', async (item?: IgnisJavaTreeItem | vscode.Uri) => {
+            const uri = resolveItemUri(item);
+            if (!uri || uri.scheme !== 'file') {
+                return;
+            }
+            const name = path.basename(uri.fsPath);
+            const choice = await vscode.window.showWarningMessage(
+                `Are you sure you want to delete '${name}'?`,
+                { modal: true },
+                'Move to Trash'
+            );
+            if (choice === 'Move to Trash') {
+                try {
+                    await vscode.workspace.fs.delete(uri, { recursive: true, useTrash: true });
+                    treeDataProvider.refresh();
+                } catch (err: any) {
+                    vscode.window.showErrorMessage(`Failed to delete: ${err.message || err}`);
+                }
+            }
         }),
         vscode.commands.registerCommand('ignis.java.navigator.openFile', (uriStr: string) => {
             if (uriStr) {

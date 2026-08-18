@@ -2,9 +2,12 @@ package com.ignis.arc.java.ide;
 
 import java.io.File;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import org.eclipse.core.resources.IProject;
 import org.eclipse.core.resources.ResourcesPlugin;
 import org.eclipse.core.runtime.IProgressMonitor;
@@ -82,46 +85,162 @@ public class IgnisSuiteCommandHandler implements IDelegateCommandHandler {
         return methodsMetrics;
     }
 
+    private static final Set<String> STREAM_LOOP_METHODS = new HashSet<>(Arrays.asList(
+        "forEach", "forEachOrdered", "flatMap", "flatMapToInt", "flatMapToLong", "flatMapToDouble"
+    ));
+
+    private static final Set<String> STREAM_TRANSFORM_METHODS = new HashSet<>(Arrays.asList(
+        "stream", "parallelStream", "parallel", "sequential",
+        "filter", "map", "mapToInt", "mapToLong", "mapToDouble", "mapToObj",
+        "distinct", "sorted", "peek", "limit", "skip", "takeWhile", "dropWhile",
+        "reduce", "collect", "min", "max", "count",
+        "anyMatch", "allMatch", "noneMatch", "findFirst", "findAny", "toArray"
+    ));
+
     private int calculateCyclomaticComplexity(MethodDeclaration method) {
         final int[] count = { 1 };
+        final int[] generalNestingLevel = { 0 };
+        final int[] loopNestingLevel = { 0 };
+
         method.getBody().accept(new ASTVisitor() {
             @Override
             public boolean visit(IfStatement node) {
-                count[0]++;
+                count[0] += (1 + generalNestingLevel[0]);
+                generalNestingLevel[0]++;
                 return true;
             }
+
+            @Override
+            public void endVisit(IfStatement node) {
+                generalNestingLevel[0] = Math.max(0, generalNestingLevel[0] - 1);
+            }
+
             @Override
             public boolean visit(ForStatement node) {
-                count[0]++;
+                int loopCost = 5 * (int) Math.pow(5, Math.min(4, loopNestingLevel[0]));
+                count[0] += loopCost;
+                generalNestingLevel[0]++;
+                loopNestingLevel[0]++;
                 return true;
             }
+
+            @Override
+            public void endVisit(ForStatement node) {
+                generalNestingLevel[0] = Math.max(0, generalNestingLevel[0] - 1);
+                loopNestingLevel[0] = Math.max(0, loopNestingLevel[0] - 1);
+            }
+
             @Override
             public boolean visit(EnhancedForStatement node) {
-                count[0]++;
+                int loopCost = 5 * (int) Math.pow(5, Math.min(4, loopNestingLevel[0]));
+                count[0] += loopCost;
+                generalNestingLevel[0]++;
+                loopNestingLevel[0]++;
                 return true;
             }
+
+            @Override
+            public void endVisit(EnhancedForStatement node) {
+                generalNestingLevel[0] = Math.max(0, generalNestingLevel[0] - 1);
+                loopNestingLevel[0] = Math.max(0, loopNestingLevel[0] - 1);
+            }
+
             @Override
             public boolean visit(WhileStatement node) {
-                count[0]++;
+                int loopCost = 5 * (int) Math.pow(5, Math.min(4, loopNestingLevel[0]));
+                count[0] += loopCost;
+                generalNestingLevel[0]++;
+                loopNestingLevel[0]++;
                 return true;
             }
+
+            @Override
+            public void endVisit(WhileStatement node) {
+                generalNestingLevel[0] = Math.max(0, generalNestingLevel[0] - 1);
+                loopNestingLevel[0] = Math.max(0, loopNestingLevel[0] - 1);
+            }
+
             @Override
             public boolean visit(DoStatement node) {
-                count[0]++;
+                int loopCost = 5 * (int) Math.pow(5, Math.min(4, loopNestingLevel[0]));
+                count[0] += loopCost;
+                generalNestingLevel[0]++;
+                loopNestingLevel[0]++;
                 return true;
             }
+
+            @Override
+            public void endVisit(DoStatement node) {
+                generalNestingLevel[0] = Math.max(0, generalNestingLevel[0] - 1);
+                loopNestingLevel[0] = Math.max(0, loopNestingLevel[0] - 1);
+            }
+
             @Override
             public boolean visit(CatchClause node) {
-                count[0]++;
+                count[0] += (1 + generalNestingLevel[0]);
+                generalNestingLevel[0]++;
                 return true;
             }
+
+            @Override
+            public void endVisit(CatchClause node) {
+                generalNestingLevel[0] = Math.max(0, generalNestingLevel[0] - 1);
+            }
+
+            @Override
+            public boolean visit(SwitchStatement node) {
+                generalNestingLevel[0]++;
+                return true;
+            }
+
+            @Override
+            public void endVisit(SwitchStatement node) {
+                generalNestingLevel[0] = Math.max(0, generalNestingLevel[0] - 1);
+            }
+
             @Override
             public boolean visit(SwitchCase node) {
                 if (!node.isDefault()) {
-                    count[0]++;
+                    count[0] += (1 + generalNestingLevel[0]);
                 }
                 return true;
             }
+
+            @Override
+            public boolean visit(LambdaExpression node) {
+                count[0] += (1 + generalNestingLevel[0]);
+                generalNestingLevel[0]++;
+                return true;
+            }
+
+            @Override
+            public void endVisit(LambdaExpression node) {
+                generalNestingLevel[0] = Math.max(0, generalNestingLevel[0] - 1);
+            }
+
+            @Override
+            public boolean visit(MethodInvocation node) {
+                String methodName = node.getName().getIdentifier();
+                if (STREAM_LOOP_METHODS.contains(methodName)) {
+                    int loopCost = 5 * (int) Math.pow(5, Math.min(4, loopNestingLevel[0]));
+                    count[0] += loopCost;
+                    generalNestingLevel[0]++;
+                    loopNestingLevel[0]++;
+                } else if (STREAM_TRANSFORM_METHODS.contains(methodName)) {
+                    count[0] += (1 + generalNestingLevel[0]);
+                }
+                return true;
+            }
+
+            @Override
+            public void endVisit(MethodInvocation node) {
+                String methodName = node.getName().getIdentifier();
+                if (STREAM_LOOP_METHODS.contains(methodName)) {
+                    generalNestingLevel[0] = Math.max(0, generalNestingLevel[0] - 1);
+                    loopNestingLevel[0] = Math.max(0, loopNestingLevel[0] - 1);
+                }
+            }
+
             @Override
             public boolean visit(InfixExpression node) {
                 InfixExpression.Operator op = node.getOperator();
@@ -130,9 +249,10 @@ public class IgnisSuiteCommandHandler implements IDelegateCommandHandler {
                 }
                 return true;
             }
+
             @Override
             public boolean visit(ConditionalExpression node) {
-                count[0]++;
+                count[0] += (1 + generalNestingLevel[0]);
                 return true;
             }
         });

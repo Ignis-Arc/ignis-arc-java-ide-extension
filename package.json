@@ -2,7 +2,7 @@
   "name": "ignis-arc-java-ide-extension",
   "displayName": "Ignis Arc Java IDE Extension Pack",
   "description": "Premium Java IDE additions featuring active-theme project navigation and real-time method complexity Code Lenses.",
-  "version": "0.1.8",
+  "version": "0.1.9",
   "publisher": "lukeme1107",
   "license": "MIT",
   "icon": "icons/ignis-logo.png",
@@ -49,6 +49,63 @@
         "icon": "$(refresh)"
       },
       {
+        "command": "ignis.java.navigator.newFile",
+        "title": "New File...",
+        "icon": "$(new-file)"
+      },
+      {
+        "command": "ignis.java.navigator.newFolder",
+        "title": "New Folder...",
+        "icon": "$(new-folder)"
+      },
+      {
+        "command": "ignis.java.navigator.newJavaClass",
+        "title": "New Java Class...",
+        "icon": "$(file-code)"
+      },
+      {
+        "command": "ignis.java.navigator.newJavaInterface",
+        "title": "New Java Interface..."
+      },
+      {
+        "command": "ignis.java.navigator.newJavaEnum",
+        "title": "New Java Enum..."
+      },
+      {
+        "command": "ignis.java.navigator.newJavaRecord",
+        "title": "New Java Record..."
+      },
+      {
+        "command": "ignis.java.navigator.revealInOS",
+        "title": "Reveal in File Explorer",
+        "icon": "$(folder-opened)"
+      },
+      {
+        "command": "ignis.java.navigator.openInTerminal",
+        "title": "Open in Integrated Terminal",
+        "icon": "$(terminal)"
+      },
+      {
+        "command": "ignis.java.navigator.revealInExplorer",
+        "title": "Reveal in VS Code Explorer"
+      },
+      {
+        "command": "ignis.java.navigator.copyPath",
+        "title": "Copy Path"
+      },
+      {
+        "command": "ignis.java.navigator.copyRelativePath",
+        "title": "Copy Relative Path"
+      },
+      {
+        "command": "ignis.java.navigator.rename",
+        "title": "Rename..."
+      },
+      {
+        "command": "ignis.java.navigator.delete",
+        "title": "Delete"
+      },
+      {
         "command": "ignis.java.complexity.refresh",
         "title": "Refresh List",
         "icon": "$(refresh)"
@@ -62,14 +119,96 @@
     "menus": {
       "view/title": [
         {
+          "command": "ignis.java.navigator.newFile",
+          "group": "navigation@1",
+          "when": "view == ignisJavaProjectNavigator"
+        },
+        {
+          "command": "ignis.java.navigator.newFolder",
+          "group": "navigation@2",
+          "when": "view == ignisJavaProjectNavigator"
+        },
+        {
           "command": "ignis.java.navigator.refresh",
-          "group": "navigation",
+          "group": "navigation@3",
           "when": "view == ignisJavaProjectNavigator"
         },
         {
           "command": "ignis.java.complexity.refresh",
           "group": "navigation",
           "when": "view == ignisJavaComplexityAnalyzer"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "ignis.java.navigator.newJavaClass",
+          "when": "view == ignisJavaProjectNavigator && (viewItem == LocalFolder || viewItem == ProjectRoot || viewItem == Package)",
+          "group": "1_new@1"
+        },
+        {
+          "command": "ignis.java.navigator.newJavaInterface",
+          "when": "view == ignisJavaProjectNavigator && (viewItem == LocalFolder || viewItem == ProjectRoot || viewItem == Package)",
+          "group": "1_new@2"
+        },
+        {
+          "command": "ignis.java.navigator.newJavaEnum",
+          "when": "view == ignisJavaProjectNavigator && (viewItem == LocalFolder || viewItem == ProjectRoot || viewItem == Package)",
+          "group": "1_new@3"
+        },
+        {
+          "command": "ignis.java.navigator.newJavaRecord",
+          "when": "view == ignisJavaProjectNavigator && (viewItem == LocalFolder || viewItem == ProjectRoot || viewItem == Package)",
+          "group": "1_new@4"
+        },
+        {
+          "command": "ignis.java.navigator.newFile",
+          "when": "view == ignisJavaProjectNavigator && (viewItem == LocalFolder || viewItem == ProjectRoot || viewItem == Package)",
+          "group": "1_new@5"
+        },
+        {
+          "command": "ignis.java.navigator.newFolder",
+          "when": "view == ignisJavaProjectNavigator && (viewItem == LocalFolder || viewItem == ProjectRoot || viewItem == Package)",
+          "group": "1_new@6"
+        },
+        {
+          "command": "ignis.java.navigator.revealInOS",
+          "when": "view == ignisJavaProjectNavigator && (viewItem == LocalFile || viewItem == LocalFolder || viewItem == ProjectRoot || viewItem == LibraryJar)",
+          "group": "2_explore@1"
+        },
+        {
+          "command": "ignis.java.navigator.openInTerminal",
+          "when": "view == ignisJavaProjectNavigator && (viewItem == LocalFile || viewItem == LocalFolder || viewItem == ProjectRoot)",
+          "group": "2_explore@2"
+        },
+        {
+          "command": "ignis.java.navigator.revealInExplorer",
+          "when": "view == ignisJavaProjectNavigator && (viewItem == LocalFile || viewItem == LocalFolder || viewItem == ProjectRoot)",
+          "group": "2_explore@3"
+        },
+        {
+          "command": "ignis.java.bytecode.view",
+          "when": "view == ignisJavaProjectNavigator && (viewItem == LocalFile && resourceExtname == .java || viewItem == Class)",
+          "group": "2_explore@4"
+        },
+        {
+          "command": "ignis.java.navigator.copyPath",
+          "when": "view == ignisJavaProjectNavigator && (viewItem == LocalFile || viewItem == LocalFolder || viewItem == ProjectRoot || viewItem == LibraryJar)",
+          "group": "3_clipboard@1"
+        },
+        {
+          "command": "ignis.java.navigator.copyRelativePath",
+          "when": "view == ignisJavaProjectNavigator && (viewItem == LocalFile || viewItem == LocalFolder || viewItem == ProjectRoot)",
+          "group": "3_clipboard@2"
+        },
+        {
+          "command": "ignis.java.navigator.rename",
+          "when": "view == ignisJavaProjectNavigator && (viewItem == LocalFile || viewItem == LocalFolder)",
+          "group": "4_modify@1"
+        },
+        {
+          "command": "ignis.java.navigator.delete",
+          "when": "view == ignisJavaProjectNavigator && (viewItem == LocalFile || viewItem == LocalFolder)",
+          "group": "4_modify@2"
         }
       ],
       "editor/title": [
@@ -113,18 +252,13 @@
         },
         "ignis.java.complexity.highThreshold": {
           "type": "integer",
-          "default": 10,
-          "description": "Threshold for high complexity warnings."
-        },
-        "ignis.java.complexity.mediumThreshold": {
-          "type": "integer",
-          "default": 5,
-          "description": "Threshold for moderate complexity."
+          "default": 30,
+          "description": "Threshold for high complexity warnings (Yellow)."
         },
         "ignis.java.complexity.criticalThreshold": {
           "type": "integer",
-          "default": 20,
-          "description": "Threshold for critical complexity."
+          "default": 60,
+          "description": "Threshold for critical complexity alerts (Red)."
         },
         "ignis.java.references.enabled": {
           "type": "boolean",

@@ -27,6 +27,11 @@ The Explorer renders a clean, native directory tree combined with dynamic Java L
     *   **Referenced Libraries**: Lists all Maven, Gradle, and user-referenced external `.jar` dependencies.
 *   **Lazy-Loaded Dependency Browser**: Expands JARs to lazy-load packages, and packages to lazy-load class files directly from the JDT LS index—yielding zero lag even in massive projects.
 *   **Instant Class Decompiler**: Simply double-click any compiled `.class` file in your referenced libraries to **decompile and display its source code with full syntax highlighting** natively via Red Hat JDT LS `jdt://` protocol.
+*   **Comprehensive Right-Click Context Menu**: Full integration with VS Code filesystem operations:
+    *   **Quick Java Scaffolding**: Right-click any folder to create `New Java Class...`, `New Java Interface...`, `New Java Enum...`, or `New Java Record...` with automatic package detection based on directory hierarchy (e.g., `src/main/java`).
+    *   **Standard File & Folder Operations**: `New File...`, `New Folder...`, `Rename...`, and `Delete` (safely moves to Trash).
+    *   **Integrated Navigation & Clipboard**: `Reveal in File Explorer / Finder`, `Open in Integrated Terminal`, `Reveal in VS Code Explorer`, `Copy Path`, and `Copy Relative Path`.
+    *   **Header Actions**: Dedicated `New File` and `New Folder` icon buttons on the Explorer title bar for fast creation.
 *   **Smart Activity Bar Visibility**: The Ignis Arc Sidebar Icon automatically shows up when a Java project is detected and completely hides in non-Java workspaces, keeping your sidebar clean.
 
 ![Ignis Arc Explorer](images/explorer_tree.png)

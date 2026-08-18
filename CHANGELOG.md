@@ -2,6 +2,20 @@
 
 All notable changes to the **Ignis Arc Java IDE Extension Pack** will be documented in this file.
 
+## [0.1.9] - 2026-08-18
+
+This release adds a comprehensive, native-style right-click context menu system for the **Ignis Arc Java Explorer**, bringing full compatibility with standard VS Code file operations, Java class/interface/enum/record generation templates, and clipboard actions.
+
+### Added
+*   **Explorer Right-Click Context Menu**:
+    *   **New File & New Folder**: Seamlessly create files and directories directly within any selected folder or root.
+    *   **Java Type Generators**: Dedicated menu actions to quickly scaffold `New Java Class...`, `New Java Interface...`, `New Java Enum...`, and `New Java Record...` with automatic Java package detection based on folder hierarchy (e.g. `src/main/java`).
+    *   **Reveal Actions**: Instant `Reveal in File Explorer / Finder` (`revealInOS`), `Open in Integrated Terminal` at the selected directory, and `Reveal in VS Code Explorer`.
+    *   **Clipboard & Management**: `Copy Path`, `Copy Relative Path`, `Rename...`, and safe `Delete` (move to Trash).
+    *   **Title Bar Actions**: Added `New File` and `New Folder` icon buttons on the Explorer title bar header.
+
+---
+
 ## [0.1.8] - 2026-05-29
 
 This release introduces a stunning, built-in **Ignis Arc Obsidian Dark** color theme, adds a gorgeous offline-capable **Interactive Theme Generator Workbench (WYSIWYG)**, adds bulletproof, generalized Lombok & synthetic symbol filtering across all DocumentSymbol kinds, eliminating duplicate/redundant Code Lenses on class annotations, and refines the side-by-side screenshot gallery in both READMEs for a premium marketplace presentation.
