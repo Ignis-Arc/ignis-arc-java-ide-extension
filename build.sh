@@ -27,8 +27,15 @@ for jar in "$JDTLS_PLUGINS_DIR"/*.jar; do
     CLASSPATH="$CLASSPATH:$jar"
 done
 
-echo "Compiling Java sources via ECJ..."
-/usr/lib/jvm/java-21-openjdk-amd64/bin/java -jar lib/org.eclipse.jdt.core.compiler.batch_*.jar -cp "$CLASSPATH" -d bin src/com/ignis/arc/java/ide/IgnisSuiteCommandHandler.java
+JAVA_BIN="java"
+if [ -n "$JAVA_HOME" ] && [ -x "$JAVA_HOME/bin/java" ]; then
+    JAVA_BIN="$JAVA_HOME/bin/java"
+elif [ -x "/usr/lib/jvm/java-21-openjdk-amd64/bin/java" ]; then
+    JAVA_BIN="/usr/lib/jvm/java-21-openjdk-amd64/bin/java"
+fi
+
+echo "Compiling Java sources via ECJ using $JAVA_BIN..."
+"$JAVA_BIN" -jar lib/org.eclipse.jdt.core.compiler.batch_*.jar -cp "$CLASSPATH" -d bin src/com/ignis/arc/java/ide/IgnisSuiteCommandHandler.java
 
 echo "Copying configuration files..."
 cp plugin.xml bin/

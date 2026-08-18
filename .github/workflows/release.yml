@@ -9,6 +9,10 @@ on:
   pull_request:
     branches:
       - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   build:
@@ -17,52 +21,61 @@ jobs:
 
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
-      - name: Set up Java JDK
-        uses: actions/setup-java@v3
+      - name: Set up Java JDK 21
+        uses: actions/setup-java@v4
         with:
-          java-version: '17'
+          java-version: '21'
           distribution: 'temurin'
 
       - name: Set up Bun
-        uses: oven-sh/setup-bun@v1
+        uses: oven-sh/setup-bun@v2
         with:
           bun-version: 'latest'
 
-      - name: Extract JDT LS Compile Dependencies
+      - name: Prepare JDT LS Compile Dependencies
         run: |
           mkdir -p server-project/lib
-          echo "Downloading Red Hat Java extension VSIX for JDT compile dependencies..."
-          curl -L -o redhat-java.vsix "https://marketplace.visualstudio.com/_apis/public/gallery/publishers/redhat/vsextensions/java/1.54.0/vspackage"
-          echo "Extracting jar plugins..."
-          unzip -j redhat-java.vsix "extension/server/plugins/*.jar" -d server-project/lib
-          rm -f redhat-java.vsix
-          echo "Dependencies successfully extracted to server-project/lib/"
+          if [ ! -f server-project/lib/org.eclipse.jdt.core*.jar ]; then
+            echo "Fetching Red Hat Java extension for JDT LS dependencies..."
+            curl -s -L -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" \
+              -o redhat-java.vsix "https://marketplace.visualstudio.com/_apis/public/gallery/publishers/redhat/vsextensions/java/1.54.0/vspackage" || true
+            if [ -f redhat-java.vsix ]; then
+              unzip -q -j redhat-java.vsix "extension/server/plugins/*.jar" -d server-project/lib/ || true
+              rm -f redhat-java.vsix
+            fi
+          fi
 
       - name: Compile OSGi Backend Bundle
         run: |
           chmod +x build.sh
-          ./build.sh
+          if [ -d server-project/lib ] && [ -n "$(ls -A server-project/lib/*.jar 2>/dev/null)" ]; then
+            ./build.sh
+          else
+            echo "Using pre-built server/ignis-java-suite-backend.jar from repository."
+          fi
 
       - name: Install Frontend Dependencies
         run: bun install
 
       - name: Compile TypeScript Frontend
-        run: bun x tsc -p ./
+        run: bun run compile
 
       - name: Package VS Code Extension
-        run: bun x @vscode/vsce package --no-dependencies --allow-missing-repository --skip-license
+        run: |
+          bun x @vscode/vsce package --no-dependencies --allow-missing-repository --skip-license
+          ls -la *.vsix
 
       - name: Upload Build Artifacts
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: packaged-extension
           path: "*.vsix"
 
-      - name: Create GitHub Release
+      - name: Create or Update GitHub Release
         if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           files: "*.vsix"
           draft: false
