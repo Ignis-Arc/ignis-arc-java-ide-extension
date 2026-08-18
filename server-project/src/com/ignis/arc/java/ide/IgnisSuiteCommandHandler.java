@@ -116,20 +116,19 @@ public class IgnisSuiteCommandHandler implements IDelegateCommandHandler {
             if (types == null || types.length == 0) {
                 return perfMap;
             }
-            IType primaryType = types[0];
-            byte[] classBytes = getClassBytesForIType(primaryType, compilationUnit.getJavaProject());
-            if (classBytes == null) {
-                return perfMap;
-            }
+            for (IType type : types) {
+                byte[] classBytes = getClassBytesForIType(type, compilationUnit.getJavaProject());
+                if (classBytes != null) {
+                    ClassReader cr = new ClassReader(classBytes);
+                    ClassNode classNode = new ClassNode();
+                    cr.accept(classNode, ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES);
 
-            ClassReader cr = new ClassReader(classBytes);
-            ClassNode classNode = new ClassNode();
-            cr.accept(classNode, ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES);
-
-            for (MethodNode mn : classNode.methods) {
-                MethodPerformance perf = evaluateMethodBytecode(mn);
-                perfMap.put(mn.name, perf);
-                perfMap.put(mn.name + mn.desc, perf);
+                    for (MethodNode mn : classNode.methods) {
+                        MethodPerformance perf = evaluateMethodBytecode(mn);
+                        perfMap.put(mn.name, perf);
+                        perfMap.put(mn.name + mn.desc, perf);
+                    }
+                }
             }
         } catch (Throwable t) {
             // Graceful fallback on any ASM or classpath issue
@@ -137,43 +136,68 @@ public class IgnisSuiteCommandHandler implements IDelegateCommandHandler {
         return perfMap;
     }
 
-    private byte[] getClassBytesForIType(IType type, IJavaProject javaProject) throws Exception {
+    private byte[] getClassBytesForIType(IType type, IJavaProject javaProject) {
         if (type == null) {
             return null;
         }
-        String fullyQualifiedName = type.getFullyQualifiedName();
-        if (fullyQualifiedName == null) {
-            return null;
-        }
+        try {
+            String fullyQualifiedName = type.getFullyQualifiedName();
+            if (fullyQualifiedName == null) {
+                return null;
+            }
+            String classRelativePath = fullyQualifiedName.replace('.', '/') + ".class";
 
-        IPackageFragmentRoot root = (IPackageFragmentRoot) type.getAncestor(IJavaElement.PACKAGE_FRAGMENT_ROOT);
-        org.eclipse.core.runtime.IPath outputPath = null;
-        if (root != null) {
+            // 1. Check PackageFragmentRoot output location
+            IPackageFragmentRoot root = (IPackageFragmentRoot) type.getAncestor(IJavaElement.PACKAGE_FRAGMENT_ROOT);
+            org.eclipse.core.resources.IWorkspaceRoot workspaceRoot = ResourcesPlugin.getWorkspace().getRoot();
+
+            List<org.eclipse.core.runtime.IPath> outputPaths = new ArrayList<>();
+            if (root != null) {
+                try {
+                    IClasspathEntry classpathEntry = root.getRawClasspathEntry();
+                    if (classpathEntry != null && classpathEntry.getOutputLocation() != null) {
+                        outputPaths.add(classpathEntry.getOutputLocation());
+                    }
+                } catch (Exception e) {
+                    // ignore
+                }
+            }
             try {
-                IClasspathEntry classpathEntry = root.getRawClasspathEntry();
-                if (classpathEntry != null) {
-                    outputPath = classpathEntry.getOutputLocation();
+                if (javaProject != null && javaProject.getOutputLocation() != null) {
+                    outputPaths.add(javaProject.getOutputLocation());
                 }
             } catch (Exception e) {
                 // ignore
             }
-        }
-        if (outputPath == null) {
-            outputPath = javaProject.getOutputLocation();
-        }
 
-        org.eclipse.core.resources.IWorkspaceRoot workspaceRoot = ResourcesPlugin.getWorkspace().getRoot();
-        org.eclipse.core.resources.IResource outputResource = workspaceRoot.findMember(outputPath);
-        if (outputResource == null || outputResource.getLocation() == null) {
-            return null;
+            for (org.eclipse.core.runtime.IPath outputPath : outputPaths) {
+                org.eclipse.core.resources.IResource outputResource = workspaceRoot.findMember(outputPath);
+                if (outputResource != null && outputResource.getLocation() != null) {
+                    File outputFolder = outputResource.getLocation().toFile();
+                    File classFile = new File(outputFolder, classRelativePath);
+                    if (classFile.exists() && classFile.isFile()) {
+                        return java.nio.file.Files.readAllBytes(classFile.toPath());
+                    }
+                }
+            }
+
+            // 2. Fallback search in project folder
+            if (javaProject != null && javaProject.getProject() != null && javaProject.getProject().getLocation() != null) {
+                File projectDir = javaProject.getProject().getLocation().toFile();
+                String[] candidateDirs = {
+                    "bin", "bin/main", "bin/default", "target/classes", "build/classes/java/main", ".apt_generated"
+                };
+                for (String relDir : candidateDirs) {
+                    File candidateFile = new File(new File(projectDir, relDir), classRelativePath);
+                    if (candidateFile.exists() && candidateFile.isFile()) {
+                        return java.nio.file.Files.readAllBytes(candidateFile.toPath());
+                    }
+                }
+            }
+        } catch (Throwable t) {
+            // ignore
         }
-        File outputFolder = outputResource.getLocation().toFile();
-        String classRelativePath = fullyQualifiedName.replace('.', '/') + ".class";
-        File classFile = new File(outputFolder, classRelativePath);
-        if (!classFile.exists()) {
-            return null;
-        }
-        return java.nio.file.Files.readAllBytes(classFile.toPath());
+        return null;
     }
 
     private MethodPerformance evaluateMethodBytecode(MethodNode mn) {
