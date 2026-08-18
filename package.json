@@ -1,8 +1,8 @@
 {
   "name": "ignis-arc-java-ide-extension",
   "displayName": "Ignis Arc Java IDE Extension Pack",
-  "description": "Premium Java IDE additions featuring active-theme project navigation and real-time method complexity Code Lenses.",
-  "version": "0.1.9",
+  "description": "Premium Java IDE additions featuring active-theme project navigation, real-time cognitive complexity, and JVM Bytecode JIT performance profiling.",
+  "version": "0.2.0",
   "publisher": "lukeme1107",
   "license": "MIT",
   "icon": "icons/ignis-logo.png",

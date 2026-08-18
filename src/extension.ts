@@ -18,6 +18,13 @@ interface MethodMetric {
     complexity: number;
     startLine: number; // 1-indexed
     endLine: number;   // 1-indexed
+    bytecodeSize?: number;
+    maxStack?: number;
+    maxLocals?: number;
+    loopAllocations?: number;
+    speedTier?: string;
+    speedEmoji?: string;
+    speedLabel?: string;
 }
 
 function registerComplexityLens(context: vscode.ExtensionContext) {
@@ -38,8 +45,27 @@ function registerComplexityLens(context: vscode.ExtensionContext) {
                 advice = 'This function contains nested loops or multiple branching structures. Review whether loop nesting can be avoided or conditions simplified.';
             }
 
+            let speedReport = '';
+            if (metric.speedEmoji && metric.bytecodeSize !== undefined && metric.bytecodeSize > 0) {
+                const inlineNote = metric.bytecodeSize < 35 
+                    ? '(Trivial Inline ⚡ - Zero Call Overhead)' 
+                    : metric.bytecodeSize > 325 
+                    ? '(JIT Inline Refused ⚠️ - Method Exceeds 325B)' 
+                    : '(JIT Inlinable in Hot Paths)';
+                const allocNote = (metric.loopAllocations && metric.loopAllocations > 0)
+                    ? `⚠️ ${metric.loopAllocations} Heap Allocation(s) / Auto-boxing in loop body (GC Pressure)`
+                    : '0 Loop Allocations (Clean & Low GC Pressure)';
+
+                speedReport = `\n\n------------------------------------\n` +
+                    `⚡ JVM Bytecode & JIT Profile:\n` +
+                    `• Speed Tier: ${metric.speedEmoji} ${metric.speedTier ? metric.speedTier.toUpperCase() : ''}\n` +
+                    `• Bytecode Size: ${metric.bytecodeSize} bytes ${inlineNote}\n` +
+                    `• Memory / GC: ${allocNote}\n` +
+                    `• Stack Frame: MaxStack = ${metric.maxStack || 0}, MaxLocals = ${metric.maxLocals || 0}`;
+            }
+
             vscode.window.showInformationMessage(
-                `Method "${metric.name}" Complexity Score: ${metric.complexity} [${rating}]\n\n${advice}`,
+                `Method "${metric.name}" Complexity: ${metric.complexity} [${rating}]\n\n${advice}${speedReport}`,
                 { modal: true }
             );
         })
@@ -114,7 +140,12 @@ class JavaComplexityCodeLensProvider implements vscode.CodeLensProvider {
                     rating = '🟡 Moderate';
                 }
 
-                const title = `Complexity: ${metric.complexity} (${rating})`;
+                let speedSuffix = '';
+                if (metric.speedEmoji && metric.bytecodeSize !== undefined && metric.bytecodeSize > 0) {
+                    speedSuffix = ` | ${metric.speedLabel || `${metric.speedEmoji} ${metric.bytecodeSize}B`}`;
+                }
+
+                const title = `Complexity: ${metric.complexity} (${rating})${speedSuffix}`;
 
                 lenses.push(
                     new vscode.CodeLens(range, {
@@ -1063,6 +1094,13 @@ interface ComplexityItem {
     endLine: number;   // 1-indexed
     uri: string;
     className: string;
+    bytecodeSize?: number;
+    maxStack?: number;
+    maxLocals?: number;
+    loopAllocations?: number;
+    speedTier?: string;
+    speedEmoji?: string;
+    speedLabel?: string;
 }
 
 class IgnisJavaComplexityTreeDataProvider implements vscode.TreeDataProvider<ComplexityItem> {
@@ -1085,14 +1123,21 @@ class IgnisJavaComplexityTreeDataProvider implements vscode.TreeDataProvider<Com
             vscode.TreeItemCollapsibleState.None
         );
 
-        treeItem.description = `Complexity: ${element.complexity}`;
+        const speedTag = (element.speedEmoji && element.bytecodeSize !== undefined && element.bytecodeSize > 0)
+            ? ` | ${element.speedEmoji} ${element.bytecodeSize}B`
+            : '';
+
+        treeItem.description = `Score: ${element.complexity}${speedTag}`;
         
+        const speedInfo = element.speedLabel ? `\n⚡ Profile: ${element.speedLabel}` : '';
+        const allocInfo = (element.loopAllocations && element.loopAllocations > 0) ? `\n💣 Loop Allocations: ${element.loopAllocations}` : '';
+
         if (isCritical) {
             treeItem.iconPath = new vscode.ThemeIcon('error', new vscode.ThemeColor('problems.errorIcon.foreground'));
-            treeItem.tooltip = `🔴 Critical Complexity: ${element.complexity}\nMethod: ${element.className}.${element.name}\nFile: ${vscode.Uri.parse(element.uri).fsPath}\nLine: ${element.startLine}`;
+            treeItem.tooltip = `🔴 Critical Complexity: ${element.complexity}\nMethod: ${element.className}.${element.name}\nFile: ${vscode.Uri.parse(element.uri).fsPath}\nLine: ${element.startLine}${speedInfo}${allocInfo}`;
         } else {
             treeItem.iconPath = new vscode.ThemeIcon('warning', new vscode.ThemeColor('problems.warningIcon.foreground'));
-            treeItem.tooltip = `🟡 High Complexity: ${element.complexity}\nMethod: ${element.className}.${element.name}\nFile: ${vscode.Uri.parse(element.uri).fsPath}\nLine: ${element.startLine}`;
+            treeItem.tooltip = `🟡 High Complexity: ${element.complexity}\nMethod: ${element.className}.${element.name}\nFile: ${vscode.Uri.parse(element.uri).fsPath}\nLine: ${element.startLine}${speedInfo}${allocInfo}`;
         }
 
         treeItem.command = {

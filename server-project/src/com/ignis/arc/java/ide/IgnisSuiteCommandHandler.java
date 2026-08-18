@@ -16,6 +16,7 @@ import org.eclipse.jdt.core.dom.*;
 import org.eclipse.jdt.ls.core.internal.IDelegateCommandHandler;
 import org.eclipse.jdt.ls.core.internal.JDTUtils;
 import org.objectweb.asm.*;
+import org.objectweb.asm.tree.*;
 import org.objectweb.asm.util.*;
 
 public class IgnisSuiteCommandHandler implements IDelegateCommandHandler {
@@ -56,6 +57,7 @@ public class IgnisSuiteCommandHandler implements IDelegateCommandHandler {
         CompilationUnit astRoot = (CompilationUnit) parser.createAST(monitor);
 
         List<Map<String, Object>> methodsMetrics = new ArrayList<>();
+        Map<String, MethodPerformance> perfMap = analyzeBytecodePerformance(compilationUnit);
 
         astRoot.accept(new ASTVisitor() {
             @Override
@@ -72,10 +74,22 @@ public class IgnisSuiteCommandHandler implements IDelegateCommandHandler {
                 int complexity = calculateCyclomaticComplexity(node);
 
                 Map<String, Object> metric = new HashMap<>();
-                metric.put("name", node.getName().getIdentifier());
+                String methodName = node.getName().getIdentifier();
+                metric.put("name", methodName);
                 metric.put("complexity", complexity);
                 metric.put("startLine", astRoot.getLineNumber(node.getName().getStartPosition()));
                 metric.put("endLine", astRoot.getLineNumber(node.getStartPosition() + node.getLength()));
+
+                MethodPerformance perf = perfMap.get(methodName);
+                if (perf != null) {
+                    metric.put("bytecodeSize", perf.bytecodeSize);
+                    metric.put("maxStack", perf.maxStack);
+                    metric.put("maxLocals", perf.maxLocals);
+                    metric.put("loopAllocations", perf.loopAllocations);
+                    metric.put("speedTier", perf.speedTier);
+                    metric.put("speedEmoji", perf.speedEmoji);
+                    metric.put("speedLabel", perf.speedLabel);
+                }
 
                 methodsMetrics.add(metric);
                 return true;
@@ -83,6 +97,199 @@ public class IgnisSuiteCommandHandler implements IDelegateCommandHandler {
         });
 
         return methodsMetrics;
+    }
+
+    static class MethodPerformance {
+        int bytecodeSize = 0;
+        int maxStack = 0;
+        int maxLocals = 0;
+        int loopAllocations = 0;
+        String speedTier = "airplane";
+        String speedEmoji = "✈️";
+        String speedLabel = "";
+    }
+
+    private Map<String, MethodPerformance> analyzeBytecodePerformance(ICompilationUnit compilationUnit) {
+        Map<String, MethodPerformance> perfMap = new HashMap<>();
+        try {
+            IType[] types = compilationUnit.getTypes();
+            if (types == null || types.length == 0) {
+                return perfMap;
+            }
+            IType primaryType = types[0];
+            byte[] classBytes = getClassBytesForIType(primaryType, compilationUnit.getJavaProject());
+            if (classBytes == null) {
+                return perfMap;
+            }
+
+            ClassReader cr = new ClassReader(classBytes);
+            ClassNode classNode = new ClassNode();
+            cr.accept(classNode, ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES);
+
+            for (MethodNode mn : classNode.methods) {
+                MethodPerformance perf = evaluateMethodBytecode(mn);
+                perfMap.put(mn.name, perf);
+                perfMap.put(mn.name + mn.desc, perf);
+            }
+        } catch (Throwable t) {
+            // Graceful fallback on any ASM or classpath issue
+        }
+        return perfMap;
+    }
+
+    private byte[] getClassBytesForIType(IType type, IJavaProject javaProject) throws Exception {
+        if (type == null) {
+            return null;
+        }
+        String fullyQualifiedName = type.getFullyQualifiedName();
+        if (fullyQualifiedName == null) {
+            return null;
+        }
+
+        IPackageFragmentRoot root = (IPackageFragmentRoot) type.getAncestor(IJavaElement.PACKAGE_FRAGMENT_ROOT);
+        org.eclipse.core.runtime.IPath outputPath = null;
+        if (root != null) {
+            try {
+                IClasspathEntry classpathEntry = root.getRawClasspathEntry();
+                if (classpathEntry != null) {
+                    outputPath = classpathEntry.getOutputLocation();
+                }
+            } catch (Exception e) {
+                // ignore
+            }
+        }
+        if (outputPath == null) {
+            outputPath = javaProject.getOutputLocation();
+        }
+
+        org.eclipse.core.resources.IWorkspaceRoot workspaceRoot = ResourcesPlugin.getWorkspace().getRoot();
+        org.eclipse.core.resources.IResource outputResource = workspaceRoot.findMember(outputPath);
+        if (outputResource == null || outputResource.getLocation() == null) {
+            return null;
+        }
+        File outputFolder = outputResource.getLocation().toFile();
+        String classRelativePath = fullyQualifiedName.replace('.', '/') + ".class";
+        File classFile = new File(outputFolder, classRelativePath);
+        if (!classFile.exists()) {
+            return null;
+        }
+        return java.nio.file.Files.readAllBytes(classFile.toPath());
+    }
+
+    private MethodPerformance evaluateMethodBytecode(MethodNode mn) {
+        MethodPerformance perf = new MethodPerformance();
+        perf.maxStack = mn.maxStack;
+        perf.maxLocals = mn.maxLocals;
+
+        int approxBytecodeSize = 0;
+        InsnList instructions = mn.instructions;
+        if (instructions != null && instructions.size() > 0) {
+            Map<LabelNode, Integer> labelIndices = new HashMap<>();
+            for (int i = 0; i < instructions.size(); i++) {
+                AbstractInsnNode insn = instructions.get(i);
+                if (insn instanceof LabelNode) {
+                    labelIndices.put((LabelNode) insn, i);
+                }
+            }
+
+            List<int[]> loopRanges = new ArrayList<>();
+            for (int i = 0; i < instructions.size(); i++) {
+                AbstractInsnNode insn = instructions.get(i);
+                if (insn instanceof JumpInsnNode) {
+                    JumpInsnNode jump = (JumpInsnNode) insn;
+                    Integer targetIdx = labelIndices.get(jump.label);
+                    if (targetIdx != null && targetIdx < i) {
+                        loopRanges.add(new int[]{ targetIdx, i });
+                    }
+                }
+            }
+
+            int loopAllocs = 0;
+            for (int i = 0; i < instructions.size(); i++) {
+                AbstractInsnNode insn = instructions.get(i);
+                int opcode = insn.getOpcode();
+                if (opcode != -1) {
+                    approxBytecodeSize += getInsnSize(insn);
+                }
+
+                boolean isAllocation = false;
+                if (opcode == Opcodes.NEW) {
+                    isAllocation = true;
+                } else if (opcode == Opcodes.INVOKESTATIC && insn instanceof MethodInsnNode) {
+                    MethodInsnNode minsn = (MethodInsnNode) insn;
+                    if ("valueOf".equals(minsn.name) && isBoxingClass(minsn.owner)) {
+                        isAllocation = true;
+                    }
+                }
+
+                if (isAllocation) {
+                    for (int[] range : loopRanges) {
+                        if (i >= range[0] && i <= range[1]) {
+                            loopAllocs++;
+                            break;
+                        }
+                    }
+                }
+            }
+            perf.loopAllocations = loopAllocs;
+        }
+        perf.bytecodeSize = Math.max(1, approxBytecodeSize);
+
+        if (perf.bytecodeSize < 35 && perf.loopAllocations == 0) {
+            perf.speedTier = "lightning";
+            perf.speedEmoji = "⚡";
+            perf.speedLabel = "⚡ " + perf.bytecodeSize + "B (Godspeed)";
+        } else if (perf.bytecodeSize <= 100 && perf.loopAllocations == 0) {
+            perf.speedTier = "rocket";
+            perf.speedEmoji = "🚀";
+            perf.speedLabel = "🚀 " + perf.bytecodeSize + "B (Rocket)";
+        } else if (perf.bytecodeSize <= 250 && perf.loopAllocations == 0) {
+            perf.speedTier = "airplane";
+            perf.speedEmoji = "✈️";
+            perf.speedLabel = "✈️ " + perf.bytecodeSize + "B (Cruising)";
+        } else if (perf.bytecodeSize <= 325 && perf.loopAllocations == 0) {
+            perf.speedTier = "car";
+            perf.speedEmoji = "🚗";
+            perf.speedLabel = "🚗 " + perf.bytecodeSize + "B (Moderate)";
+        } else if (perf.bytecodeSize <= 600 && perf.loopAllocations <= 1) {
+            perf.speedTier = "walking";
+            perf.speedEmoji = "🚶";
+            perf.speedLabel = "🚶 " + perf.bytecodeSize + "B (Inline Refused)";
+        } else {
+            perf.speedTier = "turtle";
+            perf.speedEmoji = "🐢";
+            perf.speedLabel = "🐢 " + perf.bytecodeSize + "B (Heavy)";
+        }
+
+        return perf;
+    }
+
+    private static boolean isBoxingClass(String owner) {
+        return "java/lang/Integer".equals(owner) ||
+               "java/lang/Long".equals(owner) ||
+               "java/lang/Double".equals(owner) ||
+               "java/lang/Float".equals(owner) ||
+               "java/lang/Boolean".equals(owner) ||
+               "java/lang/Short".equals(owner) ||
+               "java/lang/Byte".equals(owner) ||
+               "java/lang/Character".equals(owner);
+    }
+
+    private static int getInsnSize(AbstractInsnNode insn) {
+        int opcode = insn.getOpcode();
+        if (opcode < 0) return 0;
+        if (insn instanceof VarInsnNode) return 2;
+        if (insn instanceof IntInsnNode) return opcode == Opcodes.SIPUSH ? 3 : 2;
+        if (insn instanceof LdcInsnNode) return 2;
+        if (insn instanceof TypeInsnNode) return 3;
+        if (insn instanceof FieldInsnNode) return 3;
+        if (insn instanceof MethodInsnNode) return opcode == Opcodes.INVOKEINTERFACE ? 5 : 3;
+        if (insn instanceof InvokeDynamicInsnNode) return 5;
+        if (insn instanceof JumpInsnNode) return 3;
+        if (insn instanceof TableSwitchInsnNode || insn instanceof LookupSwitchInsnNode) return 16;
+        if (insn instanceof MultiANewArrayInsnNode) return 4;
+        if (insn instanceof IincInsnNode) return 3;
+        return 1;
     }
 
     private static final Set<String> STREAM_LOOP_METHODS = new HashSet<>(Arrays.asList(
@@ -515,6 +722,7 @@ public class IgnisSuiteCommandHandler implements IDelegateCommandHandler {
         CompilationUnit astRoot = (CompilationUnit) parser.createAST(monitor);
 
         String fileUri = JDTUtils.toUri(unit);
+        Map<String, MethodPerformance> perfMap = analyzeBytecodePerformance(unit);
 
         astRoot.accept(new ASTVisitor() {
             @Override
@@ -531,11 +739,23 @@ public class IgnisSuiteCommandHandler implements IDelegateCommandHandler {
                 int complexity = calculateCyclomaticComplexity(node);
                 if (complexity >= threshold) {
                     Map<String, Object> metric = new HashMap<>();
-                    metric.put("name", node.getName().getIdentifier());
+                    String methodName = node.getName().getIdentifier();
+                    metric.put("name", methodName);
                     metric.put("complexity", complexity);
                     metric.put("startLine", astRoot.getLineNumber(node.getName().getStartPosition()));
                     metric.put("endLine", astRoot.getLineNumber(node.getStartPosition() + node.getLength()));
                     metric.put("uri", fileUri);
+
+                    MethodPerformance perf = perfMap.get(methodName);
+                    if (perf != null) {
+                        metric.put("bytecodeSize", perf.bytecodeSize);
+                        metric.put("maxStack", perf.maxStack);
+                        metric.put("maxLocals", perf.maxLocals);
+                        metric.put("loopAllocations", perf.loopAllocations);
+                        metric.put("speedTier", perf.speedTier);
+                        metric.put("speedEmoji", perf.speedEmoji);
+                        metric.put("speedLabel", perf.speedLabel);
+                    }
 
                     String className = "";
                     ASTNode parent = node.getParent();

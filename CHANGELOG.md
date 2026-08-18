@@ -2,6 +2,30 @@
 
 All notable changes to the **Ignis Arc Java IDE Extension Pack** will be documented in this file.
 
+## [0.2.0] - 2026-08-18
+
+This milestone release introduces **JVM Bytecode JIT Performance Profiling** and the **Speed Ladder** (⚡ 🚀 ✈️ 🚗 🚶 🐢), coexisting with real-time AST Cognitive Complexity metrics.
+
+### Added
+*   **JVM Bytecode & JIT Inlining Engine (ASM-based)**:
+    *   **Speed Ladder Tiers**: Dynamically evaluates compiled Java bytecode to categorize methods into 6 intuitive performance tiers:
+        *   ⚡ **Godspeed (< 35B)**: Trivial Inline candidate guaranteed to be inlined by HotSpot C2 compiler with zero invocation overhead.
+        *   🚀 **Rocket (35B - 100B)**: Lightweight and fast, optimal inlining budget.
+        *   ✈️ **Cruising (100B - 250B)**: Standard, healthy business logic cruising speed.
+        *   🚗 **Moderate (250B - 325B)**: Approaching JVM JIT inlining limits.
+        *   🚶 **Inline Refused (> 325B)**: JVM HotSpot rejects inlining by default due to bytecode size exceeding 325 bytes.
+        *   🐢 **Turtle (> 600B or Multiple Loop Allocations)**: Heavy method with severe GC pressure or excessive size.
+    *   **Loop Heap Allocation Detection**: Catches hidden `NEW` allocations and auto-boxing (`Long.valueOf`, `Integer.valueOf`, etc.) inside loop bodies, warning developers of hidden garbage collection spikes.
+    *   **Interactive Performance Diagnostic Dialog**: Clicking any complexity lens shows full method bytecode stats including Bytecode Size, JIT inlining status, Loop Allocations, and Stack Frame details (`MaxStack` & `MaxLocals`).
+*   **Complexity & Performance Sideview Upgrades**:
+    *   Methods in the **Ignis Arc Complexity Analyzer** treeview now display both their cognitive score and bytecode speed tier (e.g. `Score: 8 | ⚡ 24B`).
+*   **Calibrated Complexity Golden Thresholds**:
+    *   🟢 **Low (Safe)**: `< 30`
+    *   🟡 **Moderate (Warning)**: `30 - 59`
+    *   🔴 **Critical (Refactor Recommended)**: `≥ 60`
+
+---
+
 ## [0.1.9] - 2026-08-18
 
 This release adds a comprehensive, native-style right-click context menu system for the **Ignis Arc Java Explorer**, bringing full compatibility with standard VS Code file operations, Java class/interface/enum/record generation templates, and clipboard actions.
