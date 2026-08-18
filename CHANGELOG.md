@@ -17,8 +17,14 @@ This milestone release introduces **JVM Bytecode JIT Performance Profiling** and
         *   🐢 **Turtle (> 600B or Multiple Loop Allocations)**: Heavy method with severe GC pressure or excessive size.
     *   **Loop Heap Allocation Detection**: Catches hidden `NEW` allocations and auto-boxing (`Long.valueOf`, `Integer.valueOf`, etc.) inside loop bodies, warning developers of hidden garbage collection spikes.
     *   **Interactive Performance Diagnostic Dialog**: Clicking any complexity lens shows full method bytecode stats including Bytecode Size, JIT inlining status, Loop Allocations, and Stack Frame details (`MaxStack` & `MaxLocals`).
-*   **Complexity & Performance Sideview Upgrades**:
-    *   Methods in the **Ignis Arc Complexity Analyzer** treeview now display both their cognitive score and bytecode speed tier (e.g. `Score: 8 | ⚡ 24B`).
+*   **Floating Markdown Hover Tooltip**:
+    *   Replaced blocking modal popups with instant, non-blocking **Markdown Floating Hover Tooltips** displaying full JIT speed profile, inlining analysis, and clean code advice on mouse hover and lens click.
+*   **Comprehensive Explorer Right-Click Suite**:
+    *   ✂️ **Clipboard Operations**: Added `Cut`, `Copy`, and `Paste` for smooth file and folder manipulation across project packages.
+    *   🧹 **Code Actions**: Added `Organize Imports` (one-click unused import cleanup and sorting) and `Format Document`.
+    *   ▶️ **Run & Debug**: Added `Run Java` and `Debug Java` directly from the right-click menu of any `.java` file.
+    *   ⚙️ **Java Project Settings**: Added direct access to Red Hat's `Java Project Settings...` Webview from any project folder or file.
+    *   🔄 **Navigator Refresh**: Added dedicated `Refresh` action on right-click context menu.
 *   **Calibrated Complexity Golden Thresholds**:
     *   🟢 **Low (Safe)**: `< 30`
     *   🟡 **Moderate (Warning)**: `30 - 59`

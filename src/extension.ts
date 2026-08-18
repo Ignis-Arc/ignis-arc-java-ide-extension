@@ -1024,6 +1024,13 @@ class IgnisJavaProjectTreeDataProvider implements vscode.TreeDataProvider<IgnisJ
     }
 }
 
+interface NavigatorClipboard {
+    sourceUri: vscode.Uri;
+    isCut: boolean;
+}
+
+let navigatorClipboard: NavigatorClipboard | null = null;
+
 function resolveTargetDirectory(item?: IgnisJavaTreeItem | vscode.Uri): string | undefined {
     if (item instanceof vscode.Uri) {
         try {
@@ -1485,6 +1492,101 @@ export async function activate(context: vscode.ExtensionContext) {
                     treeDataProvider.refresh();
                 } catch (err: any) {
                     vscode.window.showErrorMessage(`Failed to delete: ${err.message || err}`);
+                }
+            }
+        }),
+        vscode.commands.registerCommand('ignis.java.navigator.cut', (item?: IgnisJavaTreeItem | vscode.Uri) => {
+            const uri = resolveItemUri(item);
+            if (uri && uri.scheme === 'file') {
+                navigatorClipboard = { sourceUri: uri, isCut: true };
+                vscode.window.setStatusBarMessage(`$(cut) Cut '${path.basename(uri.fsPath)}' to clipboard`, 3000);
+            }
+        }),
+        vscode.commands.registerCommand('ignis.java.navigator.copy', (item?: IgnisJavaTreeItem | vscode.Uri) => {
+            const uri = resolveItemUri(item);
+            if (uri && uri.scheme === 'file') {
+                navigatorClipboard = { sourceUri: uri, isCut: false };
+                vscode.window.setStatusBarMessage(`$(copy) Copied '${path.basename(uri.fsPath)}' to clipboard`, 3000);
+            }
+        }),
+        vscode.commands.registerCommand('ignis.java.navigator.paste', async (item?: IgnisJavaTreeItem | vscode.Uri) => {
+            if (!navigatorClipboard) {
+                vscode.window.showInformationMessage('Ignis Navigator clipboard is empty.');
+                return;
+            }
+            const targetDir = resolveTargetDirectory(item);
+            if (!targetDir) {
+                vscode.window.showErrorMessage('Unable to determine destination directory.');
+                return;
+            }
+            const fileName = path.basename(navigatorClipboard.sourceUri.fsPath);
+            let destPath = path.join(targetDir, fileName);
+            if (fs.existsSync(destPath) && !navigatorClipboard.isCut) {
+                const ext = path.extname(fileName);
+                const base = path.basename(fileName, ext);
+                destPath = path.join(targetDir, `${base}_copy${ext}`);
+            }
+            const destUri = vscode.Uri.file(destPath);
+            try {
+                if (navigatorClipboard.isCut) {
+                    await vscode.workspace.fs.rename(navigatorClipboard.sourceUri, destUri, { overwrite: true });
+                    navigatorClipboard = null;
+                } else {
+                    await vscode.workspace.fs.copy(navigatorClipboard.sourceUri, destUri, { overwrite: true });
+                }
+                treeDataProvider.refresh();
+            } catch (err: any) {
+                vscode.window.showErrorMessage(`Failed to paste: ${err.message || err}`);
+            }
+        }),
+        vscode.commands.registerCommand('ignis.java.navigator.runJava', async (item?: IgnisJavaTreeItem | vscode.Uri) => {
+            const uri = resolveItemUri(item);
+            if (!uri) return;
+            const doc = await vscode.workspace.openTextDocument(uri);
+            await vscode.window.showTextDocument(doc);
+            try {
+                await vscode.commands.executeCommand('java.debug.runJavaFile', uri);
+            } catch {
+                await vscode.commands.executeCommand('workbench.action.debug.run');
+            }
+        }),
+        vscode.commands.registerCommand('ignis.java.navigator.debugJava', async (item?: IgnisJavaTreeItem | vscode.Uri) => {
+            const uri = resolveItemUri(item);
+            if (!uri) return;
+            const doc = await vscode.workspace.openTextDocument(uri);
+            await vscode.window.showTextDocument(doc);
+            try {
+                await vscode.commands.executeCommand('java.debug.debugJavaFile', uri);
+            } catch {
+                await vscode.commands.executeCommand('workbench.action.debug.start');
+            }
+        }),
+        vscode.commands.registerCommand('ignis.java.navigator.organizeImports', async (item?: IgnisJavaTreeItem | vscode.Uri) => {
+            const uri = resolveItemUri(item);
+            if (!uri) return;
+            const doc = await vscode.workspace.openTextDocument(uri);
+            await vscode.window.showTextDocument(doc);
+            await vscode.commands.executeCommand('editor.action.organizeImports');
+            await doc.save();
+            vscode.window.setStatusBarMessage(`$(symbol-namespace) Organized imports in ${path.basename(uri.fsPath)}`, 3000);
+        }),
+        vscode.commands.registerCommand('ignis.java.navigator.format', async (item?: IgnisJavaTreeItem | vscode.Uri) => {
+            const uri = resolveItemUri(item);
+            if (!uri) return;
+            const doc = await vscode.workspace.openTextDocument(uri);
+            await vscode.window.showTextDocument(doc);
+            await vscode.commands.executeCommand('editor.action.formatDocument');
+            await doc.save();
+            vscode.window.setStatusBarMessage(`$(check) Formatted ${path.basename(uri.fsPath)}`, 3000);
+        }),
+        vscode.commands.registerCommand('ignis.java.navigator.projectSettings', async () => {
+            try {
+                await vscode.commands.executeCommand('java.projectSettings');
+            } catch {
+                try {
+                    await vscode.commands.executeCommand('java.open.projectSettings');
+                } catch {
+                    await vscode.commands.executeCommand('workbench.action.openSettings', 'java');
                 }
             }
         }),

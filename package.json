@@ -106,6 +106,50 @@
         "title": "Delete"
       },
       {
+        "command": "ignis.java.navigator.cut",
+        "title": "Cut",
+        "icon": "$(cut)"
+      },
+      {
+        "command": "ignis.java.navigator.copy",
+        "title": "Copy",
+        "icon": "$(copy)"
+      },
+      {
+        "command": "ignis.java.navigator.paste",
+        "title": "Paste",
+        "icon": "$(clippy)"
+      },
+      {
+        "command": "ignis.java.navigator.runJava",
+        "title": "Run Java",
+        "icon": "$(play)"
+      },
+      {
+        "command": "ignis.java.navigator.debugJava",
+        "title": "Debug Java",
+        "icon": "$(debug-alt)"
+      },
+      {
+        "command": "ignis.java.navigator.organizeImports",
+        "title": "Organize Imports",
+        "icon": "$(symbol-namespace)"
+      },
+      {
+        "command": "ignis.java.navigator.format",
+        "title": "Format Document"
+      },
+      {
+        "command": "ignis.java.navigator.projectSettings",
+        "title": "Java Project Settings...",
+        "icon": "$(settings-gear)"
+      },
+      {
+        "command": "ignis.java.navigator.refresh",
+        "title": "Refresh",
+        "icon": "$(refresh)"
+      },
+      {
         "command": "ignis.java.complexity.refresh",
         "title": "Refresh List",
         "icon": "$(refresh)"
@@ -171,44 +215,89 @@
           "group": "1_new@6"
         },
         {
-          "command": "ignis.java.navigator.revealInOS",
-          "when": "view == ignisJavaProjectNavigator && (viewItem == LocalFile || viewItem == LocalFolder || viewItem == ProjectRoot || viewItem == LibraryJar)",
-          "group": "2_explore@1"
+          "command": "ignis.java.navigator.runJava",
+          "when": "view == ignisJavaProjectNavigator && (viewItem == LocalFile && resourceExtname == .java || viewItem == Class)",
+          "group": "2_run@1"
         },
         {
-          "command": "ignis.java.navigator.openInTerminal",
-          "when": "view == ignisJavaProjectNavigator && (viewItem == LocalFile || viewItem == LocalFolder || viewItem == ProjectRoot)",
-          "group": "2_explore@2"
+          "command": "ignis.java.navigator.debugJava",
+          "when": "view == ignisJavaProjectNavigator && (viewItem == LocalFile && resourceExtname == .java || viewItem == Class)",
+          "group": "2_run@2"
         },
         {
-          "command": "ignis.java.navigator.revealInExplorer",
-          "when": "view == ignisJavaProjectNavigator && (viewItem == LocalFile || viewItem == LocalFolder || viewItem == ProjectRoot)",
-          "group": "2_explore@3"
+          "command": "ignis.java.navigator.organizeImports",
+          "when": "view == ignisJavaProjectNavigator && (viewItem == LocalFile && resourceExtname == .java || viewItem == Class)",
+          "group": "3_code@1"
+        },
+        {
+          "command": "ignis.java.navigator.format",
+          "when": "view == ignisJavaProjectNavigator && (viewItem == LocalFile || viewItem == Class)",
+          "group": "3_code@2"
         },
         {
           "command": "ignis.java.bytecode.view",
           "when": "view == ignisJavaProjectNavigator && (viewItem == LocalFile && resourceExtname == .java || viewItem == Class)",
-          "group": "2_explore@4"
+          "group": "3_code@3"
+        },
+        {
+          "command": "ignis.java.navigator.cut",
+          "when": "view == ignisJavaProjectNavigator && (viewItem == LocalFile || viewItem == LocalFolder)",
+          "group": "4_clipboard@1"
+        },
+        {
+          "command": "ignis.java.navigator.copy",
+          "when": "view == ignisJavaProjectNavigator && (viewItem == LocalFile || viewItem == LocalFolder || viewItem == ProjectRoot)",
+          "group": "4_clipboard@2"
+        },
+        {
+          "command": "ignis.java.navigator.paste",
+          "when": "view == ignisJavaProjectNavigator && (viewItem == LocalFolder || viewItem == ProjectRoot || viewItem == Package)",
+          "group": "4_clipboard@3"
         },
         {
           "command": "ignis.java.navigator.copyPath",
           "when": "view == ignisJavaProjectNavigator && (viewItem == LocalFile || viewItem == LocalFolder || viewItem == ProjectRoot || viewItem == LibraryJar)",
-          "group": "3_clipboard@1"
+          "group": "4_clipboard@4"
         },
         {
           "command": "ignis.java.navigator.copyRelativePath",
           "when": "view == ignisJavaProjectNavigator && (viewItem == LocalFile || viewItem == LocalFolder || viewItem == ProjectRoot)",
-          "group": "3_clipboard@2"
+          "group": "4_clipboard@5"
         },
         {
           "command": "ignis.java.navigator.rename",
           "when": "view == ignisJavaProjectNavigator && (viewItem == LocalFile || viewItem == LocalFolder)",
-          "group": "4_modify@1"
+          "group": "5_modify@1"
         },
         {
           "command": "ignis.java.navigator.delete",
           "when": "view == ignisJavaProjectNavigator && (viewItem == LocalFile || viewItem == LocalFolder)",
-          "group": "4_modify@2"
+          "group": "5_modify@2"
+        },
+        {
+          "command": "ignis.java.navigator.projectSettings",
+          "when": "view == ignisJavaProjectNavigator",
+          "group": "6_config@1"
+        },
+        {
+          "command": "ignis.java.navigator.revealInOS",
+          "when": "view == ignisJavaProjectNavigator && (viewItem == LocalFile || viewItem == LocalFolder || viewItem == ProjectRoot || viewItem == LibraryJar)",
+          "group": "6_config@2"
+        },
+        {
+          "command": "ignis.java.navigator.openInTerminal",
+          "when": "view == ignisJavaProjectNavigator && (viewItem == LocalFile || viewItem == LocalFolder || viewItem == ProjectRoot)",
+          "group": "6_config@3"
+        },
+        {
+          "command": "ignis.java.navigator.revealInExplorer",
+          "when": "view == ignisJavaProjectNavigator && (viewItem == LocalFile || viewItem == LocalFolder || viewItem == ProjectRoot)",
+          "group": "6_config@4"
+        },
+        {
+          "command": "ignis.java.navigator.refresh",
+          "when": "view == ignisJavaProjectNavigator",
+          "group": "6_config@5"
         }
       ],
       "editor/title": [
