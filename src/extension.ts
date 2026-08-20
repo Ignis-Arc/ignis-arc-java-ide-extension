@@ -740,8 +740,8 @@ class IgnisJavaTreeItem extends vscode.TreeItem {
 }
 
 class IgnisJavaProjectTreeDataProvider implements vscode.TreeDataProvider<IgnisJavaTreeItem>, vscode.TreeDragAndDropController<IgnisJavaTreeItem> {
-    dropMimeTypes = ['application/vnd.code.tree.ignisJavaProjectNavigator'];
-    dragMimeTypes = ['application/vnd.code.tree.ignisJavaProjectNavigator'];
+    dropMimeTypes = ['application/vnd.code.tree.ignisJavaProjectNavigator', 'text/uri-list'];
+    dragMimeTypes = ['application/vnd.code.tree.ignisJavaProjectNavigator', 'text/uri-list'];
 
     private _onDidChangeTreeData: vscode.EventEmitter<IgnisJavaTreeItem | undefined | null | void> = new vscode.EventEmitter<IgnisJavaTreeItem | undefined | null | void>();
     public readonly onDidChangeTreeData: vscode.Event<IgnisJavaTreeItem | undefined | null | void> = this._onDidChangeTreeData.event;
@@ -751,21 +751,52 @@ class IgnisJavaProjectTreeDataProvider implements vscode.TreeDataProvider<IgnisJ
 
     handleDrag(source: readonly IgnisJavaTreeItem[], treeDataTransfer: vscode.DataTransfer, token: vscode.CancellationToken): void | Thenable<void> {
         treeDataTransfer.set('application/vnd.code.tree.ignisJavaProjectNavigator', new vscode.DataTransferItem(source));
+        const uris = source
+            .map(item => resolveItemUri(item))
+            .filter((u): u is vscode.Uri => !!u && u.scheme === 'file');
+        if (uris.length > 0) {
+            treeDataTransfer.set('text/uri-list', new vscode.DataTransferItem(uris.map(u => u.toString()).join('\r\n')));
+        }
     }
 
     async handleDrop(target: IgnisJavaTreeItem | undefined, sources: vscode.DataTransfer, token: vscode.CancellationToken): Promise<void> {
+        let sourceItems: IgnisJavaTreeItem[] = [];
         const transferItem = sources.get('application/vnd.code.tree.ignisJavaProjectNavigator');
-        if (!transferItem) {
-            return;
-        }
-        const sourceItems: IgnisJavaTreeItem[] = transferItem.value;
-        if (!sourceItems || sourceItems.length === 0) {
-            return;
+        if (transferItem && Array.isArray(transferItem.value)) {
+            sourceItems = transferItem.value;
         }
 
         const targetDir = resolveTargetDirectory(target);
         if (!targetDir) {
             return;
+        }
+
+        // If sourceItems is empty, check text/uri-list
+        if (sourceItems.length === 0) {
+            const uriListItem = sources.get('text/uri-list');
+            if (uriListItem && typeof uriListItem.value === 'string') {
+                const lines = uriListItem.value.split(/\r?\n/).map(l => l.trim()).filter(l => l.length > 0);
+                for (const line of lines) {
+                    try {
+                        const srcUri = vscode.Uri.parse(line);
+                        if (srcUri.scheme === 'file') {
+                            const fileName = path.basename(srcUri.fsPath);
+                            const destPath = path.join(targetDir, fileName);
+                            if (srcUri.fsPath !== destPath) {
+                                const destUri = vscode.Uri.file(destPath);
+                                await vscode.workspace.fs.rename(srcUri, destUri, { overwrite: false });
+                                if (fileName.endsWith('.java')) {
+                                    await updateJavaPackageDeclaration(destUri, targetDir);
+                                }
+                            }
+                        }
+                    } catch {
+                        // ignore invalid uri
+                    }
+                }
+                this.refresh();
+                return;
+            }
         }
 
         for (const item of sourceItems) {
@@ -1377,6 +1408,7 @@ export async function activate(context: vscode.ExtensionContext) {
     const treeView = vscode.window.createTreeView('ignisJavaProjectNavigator', {
         treeDataProvider,
         showCollapseAll: true,
+        canSelectMany: false,
         dragAndDropController: treeDataProvider
     });
     context.subscriptions.push(treeView);
