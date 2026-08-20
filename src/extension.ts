@@ -88,16 +88,32 @@ function registerComplexityLens(context: vscode.ExtensionContext) {
     );
 }
 
+interface CacheEntry {
+    version: number;
+    metrics: MethodMetric[];
+    isBytecodeReady: boolean;
+    timestamp: number;
+}
+
+const fastMetricsCache = new Map<string, CacheEntry>();
+const pendingCalculations = new Set<string>();
+
 class JavaComplexityCodeLensProvider implements vscode.CodeLensProvider {
     private _onDidChangeCodeLenses: vscode.EventEmitter<void> = new vscode.EventEmitter<void>();
     public readonly onDidChangeCodeLenses: vscode.Event<void> = this._onDidChangeCodeLenses.event;
 
     constructor() {
         vscode.workspace.onDidChangeConfiguration((e) => {
-            if (e.affectsConfiguration('ignis.java.complexity')) {
+            if (e.affectsConfiguration('ignis.java.complexity') || e.affectsConfiguration('ignis.java.performance')) {
+                this.clearCache();
                 this._onDidChangeCodeLenses.fire();
             }
         });
+    }
+
+    public clearCache() {
+        fastMetricsCache.clear();
+        pendingCalculations.clear();
     }
 
     public refresh() {
@@ -118,54 +134,107 @@ class JavaComplexityCodeLensProvider implements vscode.CodeLensProvider {
             return [];
         }
 
+        const perfConfig = vscode.workspace.getConfiguration('ignis.java.performance');
+        const fastCacheEnabled = perfConfig.get<boolean>('experimentalFastCache', true);
+
         const highThreshold = config.get<number>('highThreshold', 30);
         const criticalThreshold = config.get<number>('criticalThreshold', 60);
+        const docKey = document.uri.toString();
 
+        // 1. Fast-path: Check In-Memory Cache
+        if (fastCacheEnabled) {
+            const cached = fastMetricsCache.get(docKey);
+            if (cached && cached.version === document.version) {
+                return this.buildLensesFromMetrics(cached.metrics, highThreshold, criticalThreshold, cached.isBytecodeReady);
+            }
+        }
+
+        // 2. Fetch fresh metrics from JDT LS backend
         try {
+            if (pendingCalculations.has(docKey)) {
+                const cached = fastMetricsCache.get(docKey);
+                if (cached) {
+                    return this.buildLensesFromMetrics(cached.metrics, highThreshold, criticalThreshold, false);
+                }
+            }
+
+            pendingCalculations.add(docKey);
             const metrics = await vscode.commands.executeCommand<MethodMetric[]>(
                 'java.execute.workspaceCommand',
                 'ignis.java.complexity.calculate',
-                document.uri.toString()
+                docKey
             );
+            pendingCalculations.delete(docKey);
 
             if (!metrics || metrics.length === 0) {
+                fastMetricsCache.set(docKey, {
+                    version: document.version,
+                    metrics: [],
+                    isBytecodeReady: true,
+                    timestamp: Date.now()
+                });
                 return [];
             }
 
-            const lenses: vscode.CodeLens[] = [];
+            const hasBytecode = metrics.some(m => m.bytecodeSize !== undefined && m.bytecodeSize > 0);
 
-            for (const metric of metrics) {
-                const line = Math.max(0, metric.startLine - 1);
-                const range = new vscode.Range(line, 0, line, 0);
+            fastMetricsCache.set(docKey, {
+                version: document.version,
+                metrics: metrics,
+                isBytecodeReady: hasBytecode,
+                timestamp: Date.now()
+            });
 
-                let rating = '🟢 Low';
-                if (metric.complexity >= criticalThreshold) {
-                    rating = '🔴 Critical';
-                } else if (metric.complexity >= highThreshold) {
-                    rating = '🟡 Moderate';
-                }
-
-                let speedSuffix = '';
-                if (metric.speedEmoji && metric.bytecodeSize !== undefined && metric.bytecodeSize > 0) {
-                    speedSuffix = ` | ${metric.speedLabel || `${metric.speedEmoji} ${metric.bytecodeSize}B`}`;
-                }
-
-                const title = `Complexity: ${metric.complexity} (${rating})${speedSuffix}`;
-
-                lenses.push(
-                    new vscode.CodeLens(range, {
-                        title: title,
-                        command: 'ignis.java.complexity.explain',
-                        arguments: [metric]
-                    })
-                );
-            }
-
-            return lenses;
+            return this.buildLensesFromMetrics(metrics, highThreshold, criticalThreshold, hasBytecode);
         } catch (error) {
+            pendingCalculations.delete(docKey);
             console.error('Error calculating Java complexity:', error);
+            const cached = fastMetricsCache.get(docKey);
+            if (cached) {
+                return this.buildLensesFromMetrics(cached.metrics, highThreshold, criticalThreshold, cached.isBytecodeReady);
+            }
             return [];
         }
+    }
+
+    private buildLensesFromMetrics(
+        metrics: MethodMetric[],
+        highThreshold: number,
+        criticalThreshold: number,
+        isBytecodeReady: boolean
+    ): vscode.CodeLens[] {
+        const lenses: vscode.CodeLens[] = [];
+
+        for (const metric of metrics) {
+            const line = Math.max(0, metric.startLine - 1);
+            const range = new vscode.Range(line, 0, line, 0);
+
+            let rating = '🟢 Low';
+            if (metric.complexity >= criticalThreshold) {
+                rating = '🔴 Critical';
+            } else if (metric.complexity >= highThreshold) {
+                rating = '🟡 Moderate';
+            }
+
+            let speedSuffix = '';
+            if (metric.speedEmoji && metric.bytecodeSize !== undefined && metric.bytecodeSize > 0) {
+                speedSuffix = ` | ${metric.speedLabel || `${metric.speedEmoji} ${metric.bytecodeSize}B`}`;
+            } else if (!isBytecodeReady) {
+                speedSuffix = ' | ⏳ Profiling...';
+            }
+
+            const title = `Complexity: ${metric.complexity} (${rating})${speedSuffix}`;
+
+            lenses.push(
+                new vscode.CodeLens(range, {
+                    title: title,
+                    command: 'ignis.java.complexity.explain',
+                    arguments: [metric]
+                })
+            );
+        }
+
+        return lenses;
     }
 }
 
@@ -1275,6 +1344,10 @@ export async function activate(context: vscode.ExtensionContext) {
                         treeDataProvider.clearCache();
                         treeDataProvider.refresh();
                         complexityDataProvider.refresh();
+                        if (complexityCodeLensProvider) {
+                            complexityCodeLensProvider.clearCache();
+                            complexityCodeLensProvider.refresh();
+                        }
                     })
                 );
             }
@@ -1284,6 +1357,26 @@ export async function activate(context: vscode.ExtensionContext) {
     } else {
         jdtlsReady = true;
     }
+
+    // Auto-refresh CodeLens on document save to sync compiled bytecode
+    context.subscriptions.push(
+        vscode.workspace.onDidSaveTextDocument((doc) => {
+            if (doc.languageId === 'java' && complexityCodeLensProvider) {
+                // Invalidate cache for this document so next lens request gets compiled bytecode
+                const docKey = doc.uri.toString();
+                fastMetricsCache.delete(docKey);
+                // Slight delay to allow JDT LS ECJ background build to finish writing .class
+                setTimeout(() => {
+                    if (complexityCodeLensProvider) {
+                        complexityCodeLensProvider.refresh();
+                    }
+                }, 300);
+            }
+        }),
+        vscode.workspace.onDidCloseTextDocument((doc) => {
+            fastMetricsCache.delete(doc.uri.toString());
+        })
+    );
 
     // 3. Register Commands
     context.subscriptions.push(

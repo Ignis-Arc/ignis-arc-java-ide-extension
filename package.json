@@ -358,6 +358,11 @@
           "type": "boolean",
           "default": true,
           "description": "Filter out Lombok generated getters, setters, builders, and other compiler synthesized methods."
+        },
+        "ignis.java.performance.experimentalFastCache": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable experimental in-memory fast caching with async JIT profiling for zero-latency CodeLens display."
         }
       }
     }
