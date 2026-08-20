@@ -363,6 +363,11 @@
           "type": "boolean",
           "default": true,
           "description": "Enable experimental in-memory fast caching with async JIT profiling for zero-latency CodeLens display."
+        },
+        "ignis.java.explorer.compactFolders": {
+          "type": "boolean",
+          "default": true,
+          "description": "Render single-child nested folders and Java packages in a compact flat chain (e.g. com.oracle.driver)."
         }
       }
     }

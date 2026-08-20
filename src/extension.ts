@@ -931,29 +931,7 @@ class IgnisJavaProjectTreeDataProvider implements vscode.TreeDataProvider<IgnisJ
 
         // Local Folders
         if (element.type === NodeType.LocalFolder) {
-            const children: IgnisJavaTreeItem[] = [];
-            try {
-                const dirEntries = await fs.promises.readdir(element.pathValue, { withFileTypes: true });
-                const filtered = dirEntries.filter(e => !ignoredNames.has(e.name));
-                filtered.sort((a, b) => {
-                    if (a.isDirectory() && !b.isDirectory()) { return -1; }
-                    if (!a.isDirectory() && b.isDirectory()) { return 1; }
-                    return a.name.localeCompare(b.name);
-                });
-
-                for (const entry of filtered) {
-                    const fullPath = path.join(element.pathValue, entry.name);
-                    children.push(new IgnisJavaTreeItem(
-                        entry.name,
-                        entry.isDirectory() ? vscode.TreeItemCollapsibleState.Collapsed : vscode.TreeItemCollapsibleState.None,
-                        entry.isDirectory() ? NodeType.LocalFolder : NodeType.LocalFile,
-                        fullPath
-                    ));
-                }
-            } catch (e) {
-                console.error('Failed to read folder contents:', element.pathValue, e);
-            }
-            return children;
+            return this.getDirectoryAndLibraryNodes(element.pathValue);
         }
 
         // System Libraries container
@@ -1039,6 +1017,8 @@ class IgnisJavaProjectTreeDataProvider implements vscode.TreeDataProvider<IgnisJ
 
     private async getDirectoryAndLibraryNodes(dirPath: string): Promise<IgnisJavaTreeItem[]> {
         const children: IgnisJavaTreeItem[] = [];
+        const config = vscode.workspace.getConfiguration('ignis.java.explorer');
+        const compactEnabled = config.get<boolean>('compactFolders', true);
 
         // 1. Read files and directories on disk
         try {
@@ -1052,12 +1032,31 @@ class IgnisJavaProjectTreeDataProvider implements vscode.TreeDataProvider<IgnisJ
 
             for (const entry of filtered) {
                 const fullPath = path.join(dirPath, entry.name);
-                children.push(new IgnisJavaTreeItem(
-                    entry.name,
-                    entry.isDirectory() ? vscode.TreeItemCollapsibleState.Collapsed : vscode.TreeItemCollapsibleState.None,
-                    entry.isDirectory() ? NodeType.LocalFolder : NodeType.LocalFile,
-                    fullPath
-                ));
+                if (entry.isDirectory()) {
+                    if (compactEnabled) {
+                        const compact = await resolveCompactFolder(fullPath, entry.name);
+                        children.push(new IgnisJavaTreeItem(
+                            compact.displayName,
+                            vscode.TreeItemCollapsibleState.Collapsed,
+                            NodeType.LocalFolder,
+                            compact.finalPath
+                        ));
+                    } else {
+                        children.push(new IgnisJavaTreeItem(
+                            entry.name,
+                            vscode.TreeItemCollapsibleState.Collapsed,
+                            NodeType.LocalFolder,
+                            fullPath
+                        ));
+                    }
+                } else {
+                    children.push(new IgnisJavaTreeItem(
+                        entry.name,
+                        vscode.TreeItemCollapsibleState.None,
+                        NodeType.LocalFile,
+                        fullPath
+                    ));
+                }
             }
         } catch (e) {
             console.error('Failed to read directory:', dirPath, e);
@@ -1091,6 +1090,51 @@ class IgnisJavaProjectTreeDataProvider implements vscode.TreeDataProvider<IgnisJ
 
         return children;
     }
+}
+
+interface CompactFolderResult {
+    displayName: string;
+    finalPath: string;
+    isDirectory: boolean;
+}
+
+function isUnderJavaSourceRoot(folderPath: string): boolean {
+    const normalized = folderPath.replace(/\\/g, '/');
+    return normalized.includes('/src/main/java') ||
+           normalized.includes('/src/test/java') ||
+           normalized.includes('/src/java');
+}
+
+async function resolveCompactFolder(initialPath: string, initialName: string): Promise<CompactFolderResult> {
+    let currentPath = initialPath;
+    let nameParts: string[] = [initialName];
+
+    while (true) {
+        try {
+            const entries = await fs.promises.readdir(currentPath, { withFileTypes: true });
+            const filtered = entries.filter(e => !ignoredNames.has(e.name));
+
+            // If exactly 1 child and it is a directory -> chain / compact it!
+            if (filtered.length === 1 && filtered[0].isDirectory()) {
+                const nextEntry = filtered[0];
+                currentPath = path.join(currentPath, nextEntry.name);
+                nameParts.push(nextEntry.name);
+            } else {
+                break;
+            }
+        } catch {
+            break;
+        }
+    }
+
+    const isJava = isUnderJavaSourceRoot(initialPath);
+    const separator = isJava ? '.' : '/';
+
+    return {
+        displayName: nameParts.join(separator),
+        finalPath: currentPath,
+        isDirectory: true
+    };
 }
 
 interface NavigatorClipboard {
