@@ -739,12 +739,62 @@ class IgnisJavaTreeItem extends vscode.TreeItem {
     }
 }
 
-class IgnisJavaProjectTreeDataProvider implements vscode.TreeDataProvider<IgnisJavaTreeItem> {
+class IgnisJavaProjectTreeDataProvider implements vscode.TreeDataProvider<IgnisJavaTreeItem>, vscode.TreeDragAndDropController<IgnisJavaTreeItem> {
+    dropMimeTypes = ['application/vnd.code.tree.ignisJavaProjectNavigator'];
+    dragMimeTypes = ['application/vnd.code.tree.ignisJavaProjectNavigator'];
+
     private _onDidChangeTreeData: vscode.EventEmitter<IgnisJavaTreeItem | undefined | null | void> = new vscode.EventEmitter<IgnisJavaTreeItem | undefined | null | void>();
     public readonly onDidChangeTreeData: vscode.Event<IgnisJavaTreeItem | undefined | null | void> = this._onDidChangeTreeData.event;
 
     // Cache to hold library structures returned by JDT LS
     private projectLibrariesCache = new Map<string, { jreName: string; systemLibraries: any[]; referencedLibraries: any[] }>();
+
+    handleDrag(source: readonly IgnisJavaTreeItem[], treeDataTransfer: vscode.DataTransfer, token: vscode.CancellationToken): void | Thenable<void> {
+        treeDataTransfer.set('application/vnd.code.tree.ignisJavaProjectNavigator', new vscode.DataTransferItem(source));
+    }
+
+    async handleDrop(target: IgnisJavaTreeItem | undefined, sources: vscode.DataTransfer, token: vscode.CancellationToken): Promise<void> {
+        const transferItem = sources.get('application/vnd.code.tree.ignisJavaProjectNavigator');
+        if (!transferItem) {
+            return;
+        }
+        const sourceItems: IgnisJavaTreeItem[] = transferItem.value;
+        if (!sourceItems || sourceItems.length === 0) {
+            return;
+        }
+
+        const targetDir = resolveTargetDirectory(target);
+        if (!targetDir) {
+            return;
+        }
+
+        for (const item of sourceItems) {
+            const srcUri = resolveItemUri(item);
+            if (!srcUri || srcUri.scheme !== 'file') {
+                continue;
+            }
+            const fileName = path.basename(srcUri.fsPath);
+            const destPath = path.join(targetDir, fileName);
+            if (srcUri.fsPath === destPath) {
+                continue;
+            }
+            const destUri = vscode.Uri.file(destPath);
+
+            try {
+                // Move file on disk
+                await vscode.workspace.fs.rename(srcUri, destUri, { overwrite: false });
+
+                // If it's a Java file, update package declaration automatically
+                if (fileName.endsWith('.java')) {
+                    await updateJavaPackageDeclaration(destUri, targetDir);
+                }
+            } catch (err: any) {
+                vscode.window.showErrorMessage(`Failed to move ${fileName}: ${err.message || err}`);
+            }
+        }
+
+        this.refresh();
+    }
 
     refresh(): void {
         this._onDidChangeTreeData.fire();
@@ -1083,6 +1133,42 @@ function getJavaPackageFromPath(folderPath: string): string | undefined {
     return undefined;
 }
 
+async function updateJavaPackageDeclaration(fileUri: vscode.Uri, targetDir: string): Promise<void> {
+    try {
+        const newPkg = getJavaPackageFromPath(targetDir);
+        const doc = await vscode.workspace.openTextDocument(fileUri);
+        const text = doc.getText();
+
+        const pkgRegex = /^(\s*package\s+)([\w.]+)(\s*;)/m;
+        const match = pkgRegex.exec(text);
+
+        const edit = new vscode.WorkspaceEdit();
+
+        if (newPkg) {
+            if (match) {
+                const startPos = doc.positionAt(match.index);
+                const endPos = doc.positionAt(match.index + match[0].length);
+                edit.replace(fileUri, new vscode.Range(startPos, endPos), `package ${newPkg};`);
+            } else {
+                // Prepend package declaration
+                edit.insert(fileUri, new vscode.Position(0, 0), `package ${newPkg};\n\n`);
+            }
+        } else {
+            // Root package (default package)
+            if (match) {
+                const startPos = doc.positionAt(match.index);
+                const endPos = doc.positionAt(match.index + match[0].length);
+                edit.delete(fileUri, new vscode.Range(startPos, endPos));
+            }
+        }
+
+        await vscode.workspace.applyEdit(edit);
+        await doc.save();
+    } catch (e) {
+        console.error('Failed to update package declaration:', fileUri.fsPath, e);
+    }
+}
+
 async function createJavaTypeFile(
     item: IgnisJavaTreeItem | vscode.Uri | undefined,
     typeKind: 'class' | 'interface' | 'enum' | 'record',
@@ -1199,11 +1285,21 @@ class IgnisJavaComplexityTreeDataProvider implements vscode.TreeDataProvider<Com
 
     getTreeItem(element: ComplexityItem): vscode.TreeItem {
         const config = vscode.workspace.getConfiguration('ignis.java.complexity');
+        const highThreshold = config.get<number>('highThreshold', 30);
         const criticalThreshold = config.get<number>('criticalThreshold', 60);
-        const isCritical = element.complexity >= criticalThreshold;
+
+        let statusEmoji = '🟢';
+        let ratingLabel = 'Low (Safe)';
+        if (element.complexity >= criticalThreshold) {
+            statusEmoji = '🔴';
+            ratingLabel = 'Critical (Refactor Recommended)';
+        } else if (element.complexity >= highThreshold) {
+            statusEmoji = '🟡';
+            ratingLabel = 'Moderate / Warning';
+        }
 
         const treeItem = new vscode.TreeItem(
-            `${element.className}.${element.name}`,
+            `${statusEmoji} ${element.name}`,
             vscode.TreeItemCollapsibleState.None
         );
 
@@ -1211,7 +1307,7 @@ class IgnisJavaComplexityTreeDataProvider implements vscode.TreeDataProvider<Com
             ? ` | ${element.speedEmoji} ${element.bytecodeSize}B`
             : '';
 
-        treeItem.description = `Score: ${element.complexity}${speedTag}`;
+        treeItem.description = `${element.className} • Score: ${element.complexity}${speedTag}`;
         
         const speedInfo = element.speedLabel ? `\n⚡ JIT Shape: ${element.speedLabel} (${element.inliningCategory || ''})` : '';
         const allocs = element.explicitAllocations || 0;
@@ -1221,13 +1317,7 @@ class IgnisJavaComplexityTreeDataProvider implements vscode.TreeDataProvider<Com
             allocInfo = `\n⚠️ Runtime Signals: ${allocs} alloc(s) in loop, ${boxing} boxing site(s)`;
         }
 
-        if (isCritical) {
-            treeItem.iconPath = new vscode.ThemeIcon('error', new vscode.ThemeColor('problems.errorIcon.foreground'));
-            treeItem.tooltip = `🔴 Critical Complexity: ${element.complexity}\nMethod: ${element.className}.${element.name}\nFile: ${vscode.Uri.parse(element.uri).fsPath}\nLine: ${element.startLine}${speedInfo}${allocInfo}`;
-        } else {
-            treeItem.iconPath = new vscode.ThemeIcon('warning', new vscode.ThemeColor('problems.warningIcon.foreground'));
-            treeItem.tooltip = `🟡 High Complexity: ${element.complexity}\nMethod: ${element.className}.${element.name}\nFile: ${vscode.Uri.parse(element.uri).fsPath}\nLine: ${element.startLine}${speedInfo}${allocInfo}`;
-        }
+        treeItem.tooltip = `${statusEmoji} Complexity: ${element.complexity} [${ratingLabel}]\nMethod: ${element.className}.${element.name}\nFile: ${vscode.Uri.parse(element.uri).fsPath}\nLine: ${element.startLine}${speedInfo}${allocInfo}`;
 
         treeItem.command = {
             command: 'ignis.java.complexity.goto',
@@ -1286,7 +1376,8 @@ export async function activate(context: vscode.ExtensionContext) {
     const treeDataProvider = new IgnisJavaProjectTreeDataProvider();
     const treeView = vscode.window.createTreeView('ignisJavaProjectNavigator', {
         treeDataProvider,
-        showCollapseAll: true
+        showCollapseAll: true,
+        dragAndDropController: treeDataProvider
     });
     context.subscriptions.push(treeView);
 
