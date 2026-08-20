@@ -85,10 +85,13 @@ public class IgnisSuiteCommandHandler implements IDelegateCommandHandler {
                     metric.put("bytecodeSize", perf.bytecodeSize);
                     metric.put("maxStack", perf.maxStack);
                     metric.put("maxLocals", perf.maxLocals);
-                    metric.put("loopAllocations", perf.loopAllocations);
+                    metric.put("explicitAllocations", perf.explicitAllocations);
+                    metric.put("potentialBoxing", perf.potentialBoxing);
+                    metric.put("maxAllocationLoopDepth", perf.maxAllocationLoopDepth);
                     metric.put("speedTier", perf.speedTier);
                     metric.put("speedEmoji", perf.speedEmoji);
                     metric.put("speedLabel", perf.speedLabel);
+                    metric.put("inliningCategory", perf.inliningCategory);
                 }
 
                 methodsMetrics.add(metric);
@@ -103,10 +106,13 @@ public class IgnisSuiteCommandHandler implements IDelegateCommandHandler {
         int bytecodeSize = 0;
         int maxStack = 0;
         int maxLocals = 0;
-        int loopAllocations = 0;
-        String speedTier = "airplane";
+        int explicitAllocations = 0;
+        int potentialBoxing = 0;
+        int maxAllocationLoopDepth = 0;
+        String speedTier = "cruising";
         String speedEmoji = "✈️";
         String speedLabel = "";
+        String inliningCategory = "Healthy JIT shape";
     }
 
     private Map<String, MethodPerformance> analyzeBytecodePerformance(ICompilationUnit compilationUnit) {
@@ -205,7 +211,14 @@ public class IgnisSuiteCommandHandler implements IDelegateCommandHandler {
         perf.maxStack = mn.maxStack;
         perf.maxLocals = mn.maxLocals;
 
-        int approxBytecodeSize = 0;
+        // 1. Calculate Exact Bytecode length (code_length)
+        int exactCodeLength = getExactCodeLength(mn);
+        if (exactCodeLength <= 0) {
+            exactCodeLength = fallbackInstructionLength(mn);
+        }
+        perf.bytecodeSize = Math.max(1, exactCodeLength);
+
+        // 2. Analyze CFG Loops with Loop Header Merging & Back-edge Deduplication
         InsnList instructions = mn.instructions;
         if (instructions != null && instructions.size() > 0) {
             Map<LabelNode, Integer> labelIndices = new HashMap<>();
@@ -216,76 +229,219 @@ public class IgnisSuiteCommandHandler implements IDelegateCommandHandler {
                 }
             }
 
-            List<int[]> loopRanges = new ArrayList<>();
+            // Map each loop header label to its widest back-edge range [startIdx, endIdx]
+            Map<Integer, int[]> loopHeaderRanges = new HashMap<>();
             for (int i = 0; i < instructions.size(); i++) {
                 AbstractInsnNode insn = instructions.get(i);
                 if (insn instanceof JumpInsnNode) {
                     JumpInsnNode jump = (JumpInsnNode) insn;
                     Integer targetIdx = labelIndices.get(jump.label);
                     if (targetIdx != null && targetIdx < i) {
-                        loopRanges.add(new int[]{ targetIdx, i });
+                        int[] existing = loopHeaderRanges.get(targetIdx);
+                        if (existing == null) {
+                            loopHeaderRanges.put(targetIdx, new int[]{ targetIdx, i });
+                        } else {
+                            existing[1] = Math.max(existing[1], i);
+                        }
                     }
                 }
             }
 
-            int loopAllocs = 0;
+            List<int[]> mergedLoopRanges = new ArrayList<>(loopHeaderRanges.values());
+
+            // 3. Scan for Explicit Allocations and Potential Boxing inside Loops
+            int explicitAllocs = 0;
+            int boxingSites = 0;
+            int maxDepth = 0;
+
+            for (int i = 0; i < instructions.size(); i++) {
+                AbstractInsnNode insn = instructions.get(i);
+                int opcode = insn.getOpcode();
+                if (opcode < 0) continue;
+
+                boolean isExplicitAlloc = false;
+                boolean isBoxing = false;
+
+                if (opcode == Opcodes.NEW || opcode == Opcodes.NEWARRAY || 
+                    opcode == Opcodes.ANEWARRAY || opcode == Opcodes.MULTIANEWARRAY) {
+                    isExplicitAlloc = true;
+                } else if (opcode == Opcodes.INVOKESTATIC && insn instanceof MethodInsnNode) {
+                    MethodInsnNode minsn = (MethodInsnNode) insn;
+                    if ("valueOf".equals(minsn.name) && isBoxingClass(minsn.owner)) {
+                        isBoxing = true;
+                    }
+                }
+
+                if (isExplicitAlloc || isBoxing) {
+                    int depthAtInsn = 0;
+                    for (int[] range : mergedLoopRanges) {
+                        if (i >= range[0] && i <= range[1]) {
+                            depthAtInsn++;
+                        }
+                    }
+                    if (depthAtInsn > 0) {
+                        if (isExplicitAlloc) explicitAllocs++;
+                        if (isBoxing) boxingSites++;
+                        maxDepth = Math.max(maxDepth, depthAtInsn);
+                    }
+                }
+            }
+
+            perf.explicitAllocations = explicitAllocs;
+            perf.potentialBoxing = boxingSites;
+            perf.maxAllocationLoopDepth = maxDepth;
+        }
+
+        // 4. Classify JIT Shape Tier strictly by Bytecode Size (HotSpot inline guidelines)
+        if (perf.bytecodeSize <= 6) {
+            perf.speedTier = "godspeed";
+            perf.speedEmoji = "⚡";
+            perf.speedLabel = "⚡ " + perf.bytecodeSize + "B · Godspeed";
+            perf.inliningCategory = "Trivial inline candidate (<= 6B)";
+        } else if (perf.bytecodeSize <= 35) {
+            perf.speedTier = "rocket";
+            perf.speedEmoji = "🚀";
+            perf.speedLabel = "🚀 " + perf.bytecodeSize + "B · Rocket";
+            perf.inliningCategory = "Strong inline candidate (7-35B)";
+        } else if (perf.bytecodeSize <= 100) {
+            perf.speedTier = "cruising";
+            perf.speedEmoji = "✈️";
+            perf.speedLabel = "✈️ " + perf.bytecodeSize + "B · Cruising";
+            perf.inliningCategory = "Healthy JIT shape (36-100B)";
+        } else if (perf.bytecodeSize <= 325) {
+            perf.speedTier = "moderate";
+            perf.speedEmoji = "🚗";
+            perf.speedLabel = "🚗 " + perf.bytecodeSize + "B · Moderate";
+            perf.inliningCategory = "Hot-site inline candidate (101-325B)";
+        } else if (perf.bytecodeSize <= 600) {
+            perf.speedTier = "large";
+            perf.speedEmoji = "🚶";
+            perf.speedLabel = "🚶 " + perf.bytecodeSize + "B · Large";
+            perf.inliningCategory = "Large method (326-600B, default inline unlikely)";
+        } else {
+            perf.speedTier = "turtle";
+            perf.speedEmoji = "🐢";
+            perf.speedLabel = "🐢 " + perf.bytecodeSize + "B · Turtle";
+            perf.inliningCategory = "Very large method (> 600B, JIT optimization risk)";
+        }
+
+        return perf;
+    }
+
+    private int getExactCodeLength(MethodNode mn) {
+        try {
+            ClassWriter cw = new ClassWriter(0);
+            cw.visit(Opcodes.V17, Opcodes.ACC_PUBLIC, "DummyIgnisHolder", null, "java/lang/Object", null);
+            MethodVisitor mv = cw.visitMethod(mn.access, mn.name, mn.desc, mn.signature,
+                mn.exceptions == null ? null : mn.exceptions.toArray(new String[0]));
+            mn.accept(mv);
+            mv.visitEnd();
+            cw.visitEnd();
+            byte[] bytes = cw.toByteArray();
+            return extractCodeLengthFromRawBytes(bytes);
+        } catch (Throwable t) {
+            return fallbackInstructionLength(mn);
+        }
+    }
+
+    private int extractCodeLengthFromRawBytes(byte[] bytes) {
+        if (bytes == null || bytes.length < 10) return 0;
+        try {
+            java.io.DataInputStream in = new java.io.DataInputStream(new java.io.ByteArrayInputStream(bytes));
+            if (in.readInt() != 0xCAFEBABE) return 0;
+            in.readUnsignedShort(); // minor
+            in.readUnsignedShort(); // major
+            int cpCount = in.readUnsignedShort();
+            String[] utf8Pool = new String[cpCount];
+            for (int i = 1; i < cpCount; i++) {
+                int tag = in.readUnsignedByte();
+                switch (tag) {
+                    case 1:
+                        utf8Pool[i] = in.readUTF();
+                        break;
+                    case 7:
+                    case 8:
+                    case 16:
+                    case 19:
+                    case 20:
+                        in.readUnsignedShort();
+                        break;
+                    case 3:
+                    case 4:
+                    case 9:
+                    case 10:
+                    case 11:
+                    case 12:
+                    case 18:
+                        in.readInt();
+                        break;
+                    case 5:
+                    case 6:
+                        in.readLong();
+                        i++;
+                        break;
+                    case 15:
+                        in.readByte();
+                        in.readUnsignedShort();
+                        break;
+                    default:
+                        break;
+                }
+            }
+            in.readUnsignedShort(); // access_flags
+            in.readUnsignedShort(); // this_class
+            in.readUnsignedShort(); // super_class
+            int interfacesCount = in.readUnsignedShort();
+            for (int i = 0; i < interfacesCount; i++) in.readUnsignedShort();
+            int fieldsCount = in.readUnsignedShort();
+            for (int i = 0; i < fieldsCount; i++) {
+                in.readUnsignedShort();
+                in.readUnsignedShort();
+                in.readUnsignedShort();
+                int attrCount = in.readUnsignedShort();
+                for (int a = 0; a < attrCount; a++) {
+                    in.readUnsignedShort();
+                    int len = in.readInt();
+                    in.skipBytes(len);
+                }
+            }
+            int methodsCount = in.readUnsignedShort();
+            for (int m = 0; m < methodsCount; m++) {
+                in.readUnsignedShort();
+                in.readUnsignedShort();
+                in.readUnsignedShort();
+                int attrCount = in.readUnsignedShort();
+                for (int a = 0; a < attrCount; a++) {
+                    int attrNameIdx = in.readUnsignedShort();
+                    int attrLen = in.readInt();
+                    if (attrNameIdx > 0 && attrNameIdx < utf8Pool.length && "Code".equals(utf8Pool[attrNameIdx])) {
+                        in.readUnsignedShort(); // max_stack
+                        in.readUnsignedShort(); // max_locals
+                        return in.readInt(); // code_length
+                    } else {
+                        in.skipBytes(attrLen);
+                    }
+                }
+            }
+        } catch (Throwable t) {
+            // ignore
+        }
+        return 0;
+    }
+
+    private int fallbackInstructionLength(MethodNode mn) {
+        int approxBytecodeSize = 0;
+        InsnList instructions = mn.instructions;
+        if (instructions != null) {
             for (int i = 0; i < instructions.size(); i++) {
                 AbstractInsnNode insn = instructions.get(i);
                 int opcode = insn.getOpcode();
                 if (opcode != -1) {
                     approxBytecodeSize += getInsnSize(insn);
                 }
-
-                boolean isAllocation = false;
-                if (opcode == Opcodes.NEW) {
-                    isAllocation = true;
-                } else if (opcode == Opcodes.INVOKESTATIC && insn instanceof MethodInsnNode) {
-                    MethodInsnNode minsn = (MethodInsnNode) insn;
-                    if ("valueOf".equals(minsn.name) && isBoxingClass(minsn.owner)) {
-                        isAllocation = true;
-                    }
-                }
-
-                if (isAllocation) {
-                    for (int[] range : loopRanges) {
-                        if (i >= range[0] && i <= range[1]) {
-                            loopAllocs++;
-                            break;
-                        }
-                    }
-                }
             }
-            perf.loopAllocations = loopAllocs;
         }
-        perf.bytecodeSize = Math.max(1, approxBytecodeSize);
-
-        if (perf.bytecodeSize < 35 && perf.loopAllocations == 0) {
-            perf.speedTier = "lightning";
-            perf.speedEmoji = "⚡";
-            perf.speedLabel = "⚡ " + perf.bytecodeSize + "B (Godspeed)";
-        } else if (perf.bytecodeSize <= 100 && perf.loopAllocations == 0) {
-            perf.speedTier = "rocket";
-            perf.speedEmoji = "🚀";
-            perf.speedLabel = "🚀 " + perf.bytecodeSize + "B (Rocket)";
-        } else if (perf.bytecodeSize <= 250 && perf.loopAllocations == 0) {
-            perf.speedTier = "airplane";
-            perf.speedEmoji = "✈️";
-            perf.speedLabel = "✈️ " + perf.bytecodeSize + "B (Cruising)";
-        } else if (perf.bytecodeSize <= 325 && perf.loopAllocations == 0) {
-            perf.speedTier = "car";
-            perf.speedEmoji = "🚗";
-            perf.speedLabel = "🚗 " + perf.bytecodeSize + "B (Moderate)";
-        } else if (perf.bytecodeSize <= 600 && perf.loopAllocations <= 1) {
-            perf.speedTier = "walking";
-            perf.speedEmoji = "🚶";
-            perf.speedLabel = "🚶 " + perf.bytecodeSize + "B (Inline Refused)";
-        } else {
-            perf.speedTier = "turtle";
-            perf.speedEmoji = "🐢";
-            perf.speedLabel = "🐢 " + perf.bytecodeSize + "B (Heavy)";
-        }
-
-        return perf;
+        return Math.max(1, approxBytecodeSize);
     }
 
     private static boolean isBoxingClass(String owner) {
@@ -316,22 +472,28 @@ public class IgnisSuiteCommandHandler implements IDelegateCommandHandler {
         return 1;
     }
 
-    private static final Set<String> STREAM_LOOP_METHODS = new HashSet<>(Arrays.asList(
-        "forEach", "forEachOrdered", "flatMap", "flatMapToInt", "flatMapToLong", "flatMapToDouble"
+    // Stream classification sets based on architectural review
+    private static final Set<String> STREAM_EXPANDING_METHODS = new HashSet<>(Arrays.asList(
+        "flatMap", "flatMapToInt", "flatMapToLong", "flatMapToDouble"
     ));
 
-    private static final Set<String> STREAM_TRANSFORM_METHODS = new HashSet<>(Arrays.asList(
-        "stream", "parallelStream", "parallel", "sequential",
-        "filter", "map", "mapToInt", "mapToLong", "mapToDouble", "mapToObj",
-        "distinct", "sorted", "peek", "limit", "skip", "takeWhile", "dropWhile",
-        "reduce", "collect", "min", "max", "count",
-        "anyMatch", "allMatch", "noneMatch", "findFirst", "findAny", "toArray"
+    private static final Set<String> STREAM_STATEFUL_METHODS = new HashSet<>(Arrays.asList(
+        "sorted", "distinct"
+    ));
+
+    private static final Set<String> STREAM_TERMINAL_METHODS = new HashSet<>(Arrays.asList(
+        "forEach", "forEachOrdered", "collect", "reduce", "count", "findFirst", "findAny",
+        "anyMatch", "allMatch", "noneMatch", "max", "min", "toArray"
+    ));
+
+    private static final Set<String> STREAM_INTERMEDIATE_METHODS = new HashSet<>(Arrays.asList(
+        "filter", "map", "mapToInt", "mapToLong", "mapToDouble", "mapToObj", "peek", "limit", "skip",
+        "takeWhile", "dropWhile"
     ));
 
     private int calculateCyclomaticComplexity(MethodDeclaration method) {
-        final int[] count = { 1 };
+        final int[] count = { 1 }; // Base score = 1
         final int[] generalNestingLevel = { 0 };
-        final int[] loopNestingLevel = { 0 };
 
         method.getBody().accept(new ASTVisitor() {
             @Override
@@ -348,62 +510,50 @@ public class IgnisSuiteCommandHandler implements IDelegateCommandHandler {
 
             @Override
             public boolean visit(ForStatement node) {
-                int loopCost = 5 * (int) Math.pow(5, Math.min(4, loopNestingLevel[0]));
-                count[0] += loopCost;
+                count[0] += (1 + generalNestingLevel[0]);
                 generalNestingLevel[0]++;
-                loopNestingLevel[0]++;
                 return true;
             }
 
             @Override
             public void endVisit(ForStatement node) {
                 generalNestingLevel[0] = Math.max(0, generalNestingLevel[0] - 1);
-                loopNestingLevel[0] = Math.max(0, loopNestingLevel[0] - 1);
             }
 
             @Override
             public boolean visit(EnhancedForStatement node) {
-                int loopCost = 5 * (int) Math.pow(5, Math.min(4, loopNestingLevel[0]));
-                count[0] += loopCost;
+                count[0] += (1 + generalNestingLevel[0]);
                 generalNestingLevel[0]++;
-                loopNestingLevel[0]++;
                 return true;
             }
 
             @Override
             public void endVisit(EnhancedForStatement node) {
                 generalNestingLevel[0] = Math.max(0, generalNestingLevel[0] - 1);
-                loopNestingLevel[0] = Math.max(0, loopNestingLevel[0] - 1);
             }
 
             @Override
             public boolean visit(WhileStatement node) {
-                int loopCost = 5 * (int) Math.pow(5, Math.min(4, loopNestingLevel[0]));
-                count[0] += loopCost;
+                count[0] += (1 + generalNestingLevel[0]);
                 generalNestingLevel[0]++;
-                loopNestingLevel[0]++;
                 return true;
             }
 
             @Override
             public void endVisit(WhileStatement node) {
                 generalNestingLevel[0] = Math.max(0, generalNestingLevel[0] - 1);
-                loopNestingLevel[0] = Math.max(0, loopNestingLevel[0] - 1);
             }
 
             @Override
             public boolean visit(DoStatement node) {
-                int loopCost = 5 * (int) Math.pow(5, Math.min(4, loopNestingLevel[0]));
-                count[0] += loopCost;
+                count[0] += (1 + generalNestingLevel[0]);
                 generalNestingLevel[0]++;
-                loopNestingLevel[0]++;
                 return true;
             }
 
             @Override
             public void endVisit(DoStatement node) {
                 generalNestingLevel[0] = Math.max(0, generalNestingLevel[0] - 1);
-                loopNestingLevel[0] = Math.max(0, loopNestingLevel[0] - 1);
             }
 
             @Override
@@ -419,57 +569,36 @@ public class IgnisSuiteCommandHandler implements IDelegateCommandHandler {
             }
 
             @Override
-            public boolean visit(SwitchStatement node) {
-                generalNestingLevel[0]++;
-                return true;
-            }
-
-            @Override
-            public void endVisit(SwitchStatement node) {
-                generalNestingLevel[0] = Math.max(0, generalNestingLevel[0] - 1);
-            }
-
-            @Override
             public boolean visit(SwitchCase node) {
                 if (!node.isDefault()) {
-                    count[0] += (1 + generalNestingLevel[0]);
+                    count[0] += 1;
                 }
                 return true;
             }
 
             @Override
             public boolean visit(LambdaExpression node) {
-                count[0] += (1 + generalNestingLevel[0]);
-                generalNestingLevel[0]++;
+                count[0] += 1;
                 return true;
-            }
-
-            @Override
-            public void endVisit(LambdaExpression node) {
-                generalNestingLevel[0] = Math.max(0, generalNestingLevel[0] - 1);
             }
 
             @Override
             public boolean visit(MethodInvocation node) {
                 String methodName = node.getName().getIdentifier();
-                if (STREAM_LOOP_METHODS.contains(methodName)) {
-                    int loopCost = 5 * (int) Math.pow(5, Math.min(4, loopNestingLevel[0]));
-                    count[0] += loopCost;
-                    generalNestingLevel[0]++;
-                    loopNestingLevel[0]++;
-                } else if (STREAM_TRANSFORM_METHODS.contains(methodName)) {
-                    count[0] += (1 + generalNestingLevel[0]);
+                if ("stream".equals(methodName)) {
+                    count[0] += 1;
+                } else if ("parallelStream".equals(methodName)) {
+                    count[0] += 1;
+                } else if (STREAM_EXPANDING_METHODS.contains(methodName)) {
+                    count[0] += 3; // Expanding cardinality operation
+                } else if (STREAM_STATEFUL_METHODS.contains(methodName)) {
+                    count[0] += 2; // Stateful intermediate operation
+                } else if (STREAM_INTERMEDIATE_METHODS.contains(methodName)) {
+                    count[0] += 1; // Stateless intermediate
+                } else if (STREAM_TERMINAL_METHODS.contains(methodName)) {
+                    count[0] += 1; // Terminal operation
                 }
                 return true;
-            }
-
-            @Override
-            public void endVisit(MethodInvocation node) {
-                String methodName = node.getName().getIdentifier();
-                if (STREAM_LOOP_METHODS.contains(methodName)) {
-                    generalNestingLevel[0] = Math.max(0, generalNestingLevel[0] - 1);
-                    loopNestingLevel[0] = Math.max(0, loopNestingLevel[0] - 1);
-                }
             }
 
             @Override
@@ -775,10 +904,13 @@ public class IgnisSuiteCommandHandler implements IDelegateCommandHandler {
                         metric.put("bytecodeSize", perf.bytecodeSize);
                         metric.put("maxStack", perf.maxStack);
                         metric.put("maxLocals", perf.maxLocals);
-                        metric.put("loopAllocations", perf.loopAllocations);
+                        metric.put("explicitAllocations", perf.explicitAllocations);
+                        metric.put("potentialBoxing", perf.potentialBoxing);
+                        metric.put("maxAllocationLoopDepth", perf.maxAllocationLoopDepth);
                         metric.put("speedTier", perf.speedTier);
                         metric.put("speedEmoji", perf.speedEmoji);
                         metric.put("speedLabel", perf.speedLabel);
+                        metric.put("inliningCategory", perf.inliningCategory);
                     }
 
                     String className = "";

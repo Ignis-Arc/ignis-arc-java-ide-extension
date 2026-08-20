@@ -21,10 +21,13 @@ interface MethodMetric {
     bytecodeSize?: number;
     maxStack?: number;
     maxLocals?: number;
-    loopAllocations?: number;
+    explicitAllocations?: number;
+    potentialBoxing?: number;
+    maxAllocationLoopDepth?: number;
     speedTier?: string;
     speedEmoji?: string;
     speedLabel?: string;
+    inliningCategory?: string;
 }
 
 function registerComplexityLens(context: vscode.ExtensionContext) {
@@ -35,33 +38,40 @@ function registerComplexityLens(context: vscode.ExtensionContext) {
             const highThreshold = config.get<number>('highThreshold', 30);
             const criticalThreshold = config.get<number>('criticalThreshold', 60);
 
-            let rating = '🟢 Low (Safe)';
-            let advice = 'This function is clean, easy to comprehend, and has minimal performance overhead. Great job!';
+            let rating = '🟢 Low';
+            let advice = 'Clean control flow with low cognitive and iteration load.';
             if (metric.complexity >= criticalThreshold) {
-                rating = '🔴 Critical (Refactoring Recommended)';
-                advice = 'This method has deep loop nesting (O(N^2)/O(N^3)) or excessive decision branches. Refactor by extracting helper methods, using lookups/maps, or flattening stream operations.';
+                rating = '🔴 Critical';
+                advice = 'Deep nested iteration or excessive decision branches. Refactoring recommended.';
             } else if (metric.complexity >= highThreshold) {
-                rating = '🟡 Moderate / Warning';
-                advice = 'This function contains nested loops or multiple branching structures. Review whether loop nesting can be avoided or conditions simplified.';
+                rating = '🟡 Moderate';
+                advice = 'Contains nested loops or multiple branches. Review if logic can be simplified.';
             }
 
-            let speedReport = '';
+            let lines: string[] = [];
+            lines.push(`Method: "${metric.name}"`);
+            lines.push(`🧠 Cognitive / Structural: ${metric.complexity} [${rating}]`);
+            lines.push(`💡 Advice: ${advice}`);
+
             if (metric.speedEmoji && metric.bytecodeSize !== undefined && metric.bytecodeSize > 0) {
-                const inlineNote = metric.bytecodeSize < 35 
-                    ? '(Trivial Inline ⚡ - Zero Call Overhead)' 
-                    : metric.bytecodeSize > 325 
-                    ? '(JIT Inline Refused ⚠️ - Exceeds 325B)' 
-                    : '(JIT Inlinable in Hot Paths)';
-                const allocNote = (metric.loopAllocations && metric.loopAllocations > 0)
-                    ? `⚠️ ${metric.loopAllocations} Heap Allocation(s) in loop (GC Pressure)`
-                    : '0 Loop Allocations (Clean)';
-
-                speedReport = `\n\n⚡ Speed Tier: ${metric.speedEmoji} ${(metric.speedTier || 'airplane').toUpperCase()} | Size: ${metric.bytecodeSize}B ${inlineNote}\n💣 GC: ${allocNote} | 🥞 Frame: Stack=${metric.maxStack || 0}, Locals=${metric.maxLocals || 0}`;
+                lines.push(`⚡ JIT Shape: ${metric.speedEmoji} ${(metric.speedTier || 'cruising').toUpperCase()} · ${metric.bytecodeSize}B (${metric.inliningCategory || 'Healthy JIT shape'})`);
+                lines.push(`🥞 Frame: MaxStack=${metric.maxStack || 0}, MaxLocals=${metric.maxLocals || 0}`);
             }
 
-            vscode.window.showInformationMessage(
-                `Method "${metric.name}" Complexity: ${metric.complexity} [${rating}]\n${advice}${speedReport}`
-            );
+            const allocs = metric.explicitAllocations || 0;
+            const boxing = metric.potentialBoxing || 0;
+            if (allocs > 0 || boxing > 0) {
+                let riskItems: string[] = [];
+                if (allocs > 0) {
+                    riskItems.push(`${allocs} explicit allocation(s) in loop (depth ${metric.maxAllocationLoopDepth || 1})`);
+                }
+                if (boxing > 0) {
+                    riskItems.push(`${boxing} potential boxing site(s)`);
+                }
+                lines.push(`⚠️ Runtime Signals: ${riskItems.join(' · ')}`);
+            }
+
+            vscode.window.showInformationMessage(lines.join('\n'));
         })
     );
 
@@ -1099,10 +1109,13 @@ interface ComplexityItem {
     bytecodeSize?: number;
     maxStack?: number;
     maxLocals?: number;
-    loopAllocations?: number;
+    explicitAllocations?: number;
+    potentialBoxing?: number;
+    maxAllocationLoopDepth?: number;
     speedTier?: string;
     speedEmoji?: string;
     speedLabel?: string;
+    inliningCategory?: string;
 }
 
 class IgnisJavaComplexityTreeDataProvider implements vscode.TreeDataProvider<ComplexityItem> {
@@ -1131,8 +1144,13 @@ class IgnisJavaComplexityTreeDataProvider implements vscode.TreeDataProvider<Com
 
         treeItem.description = `Score: ${element.complexity}${speedTag}`;
         
-        const speedInfo = element.speedLabel ? `\n⚡ Profile: ${element.speedLabel}` : '';
-        const allocInfo = (element.loopAllocations && element.loopAllocations > 0) ? `\n💣 Loop Allocations: ${element.loopAllocations}` : '';
+        const speedInfo = element.speedLabel ? `\n⚡ JIT Shape: ${element.speedLabel} (${element.inliningCategory || ''})` : '';
+        const allocs = element.explicitAllocations || 0;
+        const boxing = element.potentialBoxing || 0;
+        let allocInfo = '';
+        if (allocs > 0 || boxing > 0) {
+            allocInfo = `\n⚠️ Runtime Signals: ${allocs} alloc(s) in loop, ${boxing} boxing site(s)`;
+        }
 
         if (isCritical) {
             treeItem.iconPath = new vscode.ThemeIcon('error', new vscode.ThemeColor('problems.errorIcon.foreground'));
