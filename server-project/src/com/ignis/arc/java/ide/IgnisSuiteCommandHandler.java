@@ -295,33 +295,33 @@ public class IgnisSuiteCommandHandler implements IDelegateCommandHandler {
         // 4. Classify JIT Shape Tier strictly by Bytecode Size (HotSpot inline guidelines)
         if (perf.bytecodeSize <= 6) {
             perf.speedTier = "godspeed";
-            perf.speedEmoji = "⚡";
-            perf.speedLabel = "⚡ " + perf.bytecodeSize + "B · Godspeed";
+            perf.speedEmoji = "🤩";
+            perf.speedLabel = "🤩 " + perf.bytecodeSize + "B · Godspeed";
             perf.inliningCategory = "Trivial inline candidate (<= 6B)";
         } else if (perf.bytecodeSize <= 35) {
-            perf.speedTier = "rocket";
-            perf.speedEmoji = "🚀";
-            perf.speedLabel = "🚀 " + perf.bytecodeSize + "B · Rocket";
+            perf.speedTier = "compact";
+            perf.speedEmoji = "😄";
+            perf.speedLabel = "😄 " + perf.bytecodeSize + "B · Compact";
             perf.inliningCategory = "Strong inline candidate (7-35B)";
         } else if (perf.bytecodeSize <= 100) {
-            perf.speedTier = "cruising";
-            perf.speedEmoji = "✈️";
-            perf.speedLabel = "✈️ " + perf.bytecodeSize + "B · Cruising";
+            perf.speedTier = "standard";
+            perf.speedEmoji = "🙂";
+            perf.speedLabel = "🙂 " + perf.bytecodeSize + "B · Standard";
             perf.inliningCategory = "Healthy JIT shape (36-100B)";
         } else if (perf.bytecodeSize <= 325) {
             perf.speedTier = "moderate";
-            perf.speedEmoji = "🚗";
-            perf.speedLabel = "🚗 " + perf.bytecodeSize + "B · Moderate";
+            perf.speedEmoji = "🧐";
+            perf.speedLabel = "🧐 " + perf.bytecodeSize + "B · Moderate";
             perf.inliningCategory = "Hot-site inline candidate (101-325B)";
         } else if (perf.bytecodeSize <= 600) {
             perf.speedTier = "large";
-            perf.speedEmoji = "🚶";
-            perf.speedLabel = "🚶 " + perf.bytecodeSize + "B · Large";
+            perf.speedEmoji = "🤔";
+            perf.speedLabel = "🤔 " + perf.bytecodeSize + "B · Large";
             perf.inliningCategory = "Large method (326-600B, default inline unlikely)";
         } else {
-            perf.speedTier = "turtle";
-            perf.speedEmoji = "🐢";
-            perf.speedLabel = "🐢 " + perf.bytecodeSize + "B · Turtle";
+            perf.speedTier = "monolith";
+            perf.speedEmoji = "🤯";
+            perf.speedLabel = "🤯 " + perf.bytecodeSize + "B · Monolith";
             perf.inliningCategory = "Very large method (> 600B, JIT optimization risk)";
         }
 

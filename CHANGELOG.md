@@ -7,16 +7,21 @@ All notable changes to the **Ignis Arc Java IDE Extension Pack** will be documen
 This milestone release introduces **JVM Bytecode JIT Performance Profiling** and the **Speed Ladder** (⚡ 🚀 ✈️ 🚗 🚶 🐢), coexisting with real-time AST Cognitive Complexity metrics.
 
 ### Added
-*   **JVM Bytecode & JIT Inlining Engine (ASM-based)**:
-    *   **Speed Ladder Tiers**: Dynamically evaluates compiled Java bytecode to categorize methods into 6 intuitive performance tiers:
-        *   ⚡ **Godspeed (< 35B)**: Trivial Inline candidate guaranteed to be inlined by HotSpot C2 compiler with zero invocation overhead.
-        *   🚀 **Rocket (35B - 100B)**: Lightweight and fast, optimal inlining budget.
-        *   ✈️ **Cruising (100B - 250B)**: Standard, healthy business logic cruising speed.
-        *   🚗 **Moderate (250B - 325B)**: Approaching JVM JIT inlining limits.
-        *   🚶 **Inline Refused (> 325B)**: JVM HotSpot rejects inlining by default due to bytecode size exceeding 325 bytes.
-        *   🐢 **Turtle (> 600B or Multiple Loop Allocations)**: Heavy method with severe GC pressure or excessive size.
-    *   **Loop Heap Allocation Detection**: Catches hidden `NEW` allocations and auto-boxing (`Long.valueOf`, `Integer.valueOf`, etc.) inside loop bodies, warning developers of hidden garbage collection spikes.
-    *   **Interactive Performance Diagnostic Dialog**: Clicking any complexity lens shows full method bytecode stats including Bytecode Size, JIT inlining status, Loop Allocations, and Stack Frame details (`MaxStack` & `MaxLocals`).
+*   **JVM Bytecode JIT Shape & Inlining Friendliness Engine (ASM-based)**:
+    *   **JIT Shape Mood Tiers (Facial Emoji Ladder)**: Dynamically evaluates compiled Java bytecode exact `code_length` to categorize methods into 6 intuitive HotSpot JIT inlining friendliness tiers:
+        *   🤩 **Godspeed (≤ 6B)**: Trivial Inline Candidate (`MaxTrivialSize`), JVM JIT easily inlines with zero call overhead.
+        *   😄 **Compact (7B - 35B)**: Strong Inline Candidate (`MaxInlineSize`), optimal size for clean business methods.
+        *   🙂 **Standard (36B - 100B)**: Healthy JIT Shape, standard cruising size for typical application logic.
+        *   🧐 **Moderate (101B - 325B)**: Hot-site Inline Candidate (`FreqInlineSize`), JIT considers inlining on frequent hot paths.
+        *   🤔 **Large (326B - 600B)**: Large Method, exceeds typical HotSpot inline budget, default inlining unlikely.
+        *   🤯 **Monolith (> 600B)**: Very Large Method, high JIT compilation and register allocation overhead risk.
+    *   **Decoupled Runtime Risk Signals**:
+        *   Catches explicit allocations (`NEW`, `NEWARRAY`, `ANEWARRAY`, `MULTIANEWARRAY`) inside loop bodies with exact loop depth.
+        *   Detects `Potential Boxing Sites` (`Integer.valueOf`, etc.) inside loops.
+        *   Merges CFG loop header regions to avoid duplicate counting on `continue`.
+    *   **Decoupled Stream Complexity Signals**:
+        *   Separates stream pipelines from lexical loop nesting weights.
+        *   Distinguishes expanding operations (`flatMap`), stateful operations (`sorted`, `distinct`), and terminal reductions.
 *   **Floating Markdown Hover Tooltip**:
     *   Replaced blocking modal popups with instant, non-blocking **Markdown Floating Hover Tooltips** displaying full JIT speed profile, inlining analysis, and clean code advice on mouse hover and lens click.
 *   **Comprehensive Explorer Right-Click Suite**:
